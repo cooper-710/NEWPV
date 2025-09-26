@@ -4,7 +4,6 @@ import { Bus } from './data.js';
 
 let _state = { team: null, pitcher: null };
 
-// build per-pitch-type UI with a master toggle
 export function buildPitchCheckboxes(pitcherData) {
   const container = document.getElementById('pitchCheckboxes');
   container.innerHTML = '';
@@ -79,7 +78,7 @@ export function buildPitchCheckboxes(pitcherData) {
     container.appendChild(group);
   });
 
-  // clear-all button
+  // Clear All
   const clr = document.createElement('button');
   clr.textContent = 'Clear All';
   clr.addEventListener('click', () => {
@@ -102,7 +101,7 @@ export function initControls(data, setPlaying) {
   const trailToggle   = document.getElementById('trailToggle');
   const metricsPanel  = document.getElementById('metricsPanel');
 
-  // fill teams
+  // teams
   for (const team in data) {
     const opt = document.createElement('option');
     opt.value = team; opt.textContent = team;
@@ -128,10 +127,7 @@ export function initControls(data, setPlaying) {
     _writeUrl();
   });
 
-  cameraSelect.addEventListener('change', (e) => {
-    setCameraView(e.target.value);
-    _writeUrl();
-  });
+  cameraSelect.addEventListener('change', (e) => { setCameraView(e.target.value); _writeUrl(); });
 
   replayBtn.addEventListener('click', replayAll);
 
@@ -140,10 +136,7 @@ export function initControls(data, setPlaying) {
     toggleBtn.textContent = next ? 'Pause' : 'Play';
   });
 
-  trailToggle.addEventListener('change', e => {
-    setTrailVisible(e.target.checked);
-    _writeUrl();
-  });
+  trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
   // live metrics
   metricsPanel.style.display = 'block';
