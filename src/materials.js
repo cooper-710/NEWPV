@@ -1,26 +1,84 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js';
 
-export function createHalfColorMaterial(pitchType) {
-  const base = (pitchType || '').split(' ')[0];
-  const hexMap = {
-    FF:'#FF0000', SL:'#0000FF', CH:'#008000', KC:'#4B0082',
-    SI:'#FFA500', CU:'#800080', FC:'#808080', ST:'#008080',
-    FS:'#00CED1', EP:'#FF69B4', KN:'#A9A9A9', SC:'#708090',
-    SV:'#000000', CS:'#A52A2A', FO:'#DAA520'
-  };
-  const hex = hexMap[base] || '#888888';
-
-  const c = document.createElement('canvas');
-  c.width = 2; c.height = 2;
+/**
+ * Generates a tiny monochrome noise texture to mimic leather pores.
+ * Used as a bump map so we avoid external assets.
+ */
+function makeLeatherBump(size = 128) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = hex;       ctx.fillRect(0,0,2,1);
-  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0,1,2,1);
+  const img = ctx.createImageData(size, size);
+  for (let i=0;i<img.data.length;i+=4){
+    const n = 220 + Math.random()*35; // tight dynamic range
+    img.data[i]=img.data[i+1]=img.data[i+2]=n; img.data[i+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4,4);
+  tex.minFilter = THREE.LinearMipMapLinearFilter;
+  return tex;
+}
 
-  const texture = new THREE.CanvasTexture(c);
-  texture.minFilter = THREE.NearestFilter;
-  texture.magFilter = THREE.NearestFilter;
+/**
+ * Two thin red rings near the 'seams' + white leather base.
+ * This preserves your half-color idea but looks more realistic.
+ */
+function makeSeamAlbedo() {
+  const w=512,h=512;
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx = c.getContext('2d');
 
-  return new THREE.MeshStandardMaterial({ map: texture, roughness: 0.4, metalness: 0.1 });
+  // base
+  ctx.fillStyle = '#f7f7f7';
+  ctx.fillRect(0,0,w,h);
+
+  // two thin horizontal rings (pseudo seams)
+  ctx.fillStyle = '#d1342f';
+  const bandH = 10;
+  const y1 = Math.floor(h*0.32), y2 = Math.floor(h*0.68);
+  ctx.fillRect(0, y1, w, bandH);
+  ctx.fillRect(0, y2, w, bandH);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1,1);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+export function createHalfColorMaterial(pitchType) {
+  // Map type to accent overlay color (subtle tint on the seams)
+  const base = (pitchType || '').split(' ')[0];
+  const accent = {
+    FF:'#ff3b30', SL:'#0a84ff', CH:'#30d158', KC:'#5e5ce6',
+    SI:'#ff9f0a', CU:'#bf5af2', FC:'#8e8e93', ST:'#64d2ff',
+    FS:'#64d2ff', EP:'#ff375f', KN:'#a1a1a6', SC:'#6e6e73',
+    SV:'#ffffff', CS:'#ac8e68', FO:'#ffd60a'
+  }[base] || '#ff3b30';
+
+  const albedo = makeSeamAlbedo();
+  const bump = makeLeatherBump();
+
+  const mat = new THREE.MeshPhysicalMaterial({
+    map: albedo,
+    color: new THREE.Color('#ffffff'),
+    roughness: 0.55,
+    metalness: 0.0,
+    sheen: 0.4,                 // subtle fabric-like sheen
+    sheenColor: new THREE.Color('#ffffff'),
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.6,
+    reflectivity: 0.3,
+    bumpMap: bump,
+    bumpScale: 0.015
+  });
+
+  // slight seam tint via vertex colors trick: add a small emissive term
+  mat.emissive = new THREE.Color(accent);
+  mat.emissiveIntensity = 0.03;
+
+  return mat;
 }
 
 export function getSpinAxisVector(degrees) {
