@@ -1,36 +1,135 @@
 import * as THREE from 'three';
 
 /**
- * Physically-based baseball with shader-drawn seams:
- * - Two tilted great-circle seams (accurate spherical paths)
- * - Thick seams (tune SEAM_WIDTH_RAD)
- * - Leather pores via procedural bump (no external images)
+ * Baseball material with CPU-baked, accurate great-circle seams.
+ * - Two tilted great circles (true spherical paths)
+ * - Seam thickness ~5x (tweak SEAM_HALF_WIDTH_RAD)
+ * - Leather pores + embossed seam ridge in bump map
+ * - No fragile shader injection; works everywhere
  */
 
-const SEAM_WIDTH_RAD = 0.14;                       // ~8° half-width (bold; ~5×)
-const SEAM_COLOR     = new THREE.Color('#C91F24'); // seam red
+/* -------------------- Tunables -------------------- */
+const TEX_W = 2048, TEX_H = 1024;                 // high-res equirect map
+const SEAM_COLOR = [201, 31, 36];                 // #C91F24
+const LEATHER_RGB = [242, 242, 242];              // warm white
+const SEAM_HALF_WIDTH_RAD = 0.14;                 // ≈8° half-width (bold)
+const SEAM_EDGE_SOFT_RAD  = 0.01;                 // soft edge (~0.6°)
+const SEAM_BUMP_HEIGHT    = 22;                   // emboss intensity (0..255)
+const PORES_JITTER        = 18;                   // leather pore variance
 
-// Two seam plane normals (tilted so the paths look like real seams)
+// seam plane normals (tilt so they look like real seams)
 const P1 = new THREE.Vector3(0.0,  0.62,  0.78).normalize();
 const P2 = new THREE.Vector3(0.0, -0.62,  0.78).normalize();
 
-/* -------- Leather bump (procedural) -------- */
-function makeLeatherBump(w = 1024, h = 1024) {
+/* -------------------- Math helpers -------------------- */
+// Convert (u in [0,1], v in [0,1]) to unit-sphere direction (x,y,z)
+function uvToDir(u, v) {
+  const theta = (u * 2.0 - 1.0) * Math.PI; // [-π, π]
+  const phi   = v * Math.PI;               // [0, π]
+  const st = Math.sin(theta), ct = Math.cos(theta);
+  const sp = Math.sin(phi),   cp = Math.cos(phi);
+  return new THREE.Vector3(ct * sp, cp, st * sp);
+}
+
+// Angular distance (radians) from dir to great circle defined by plane normal pn.
+function angDistToGreatCircle(dir, pn) {
+  // Great circle = { dir | dot(dir, pn) = 0 }. Distance = asin(|dot|).
+  return Math.asin(Math.abs(dir.x * pn.x + dir.y * pn.y + dir.z * pn.z));
+}
+
+// Smooth mask 0..1 for seam band centered at distance 0 with half-width W and soft edge E.
+function seamMask(dist, W, E) {
+  // 1 inside band, fall off to 0 over +/-E via smoothstep
+  const a = W - E;
+  const b = W + E;
+  if (dist <= a) return 1.0;
+  if (dist >= b) return 0.0;
+  const t = (dist - a) / (b - a);
+  return 1.0 - (t * t * (3 - 2 * t)); // smoothstep mirrored
+}
+
+/* -------------------- Texture builders -------------------- */
+function buildAlbedoTexture(w = TEX_W, h = TEX_H) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d', { willReadFrequently: true });
   const img = ctx.createImageData(w, h);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const n = 210 + (Math.random()*36 - 18); // pores
-    img.data[i] = img.data[i+1] = img.data[i+2] = n;
-    img.data[i+3] = 255;
+  const [lr, lg, lb] = LEATHER_RGB;
+  const [sr, sg, sb] = SEAM_COLOR;
+
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1);
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const dir = uvToDir(u, v);
+
+      const d1 = angDistToGreatCircle(dir, P1);
+      const d2 = angDistToGreatCircle(dir, P2);
+
+      const m1 = seamMask(d1, SEAM_HALF_WIDTH_RAD, SEAM_EDGE_SOFT_RAD);
+      const m2 = seamMask(d2, SEAM_HALF_WIDTH_RAD, SEAM_EDGE_SOFT_RAD);
+      const m  = Math.min(1.0, m1 + m2); // combine seams
+
+      // base leather with tiny radial vignette
+      const vignette = 1.0 - 0.05 * Math.pow(2.0 * Math.abs(v - 0.5), 2.0);
+      let r = lr * vignette, g = lg * vignette, b = lb * vignette;
+
+      // mix in seam color
+      r = r * (1 - m) + sr * m;
+      g = g * (1 - m) + sg * m;
+      b = b * (1 - m) + sb * m;
+
+      const i = (y * w + x) << 2;
+      img.data[i]     = r | 0;
+      img.data[i + 1] = g | 0;
+      img.data[i + 2] = b | 0;
+      img.data[i + 3] = 255;
+    }
   }
+
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
   return tex;
 }
 
-/* -------- Exported API -------- */
+function buildBumpTexture(w = TEX_W, h = TEX_H) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const img = ctx.createImageData(w, h);
+
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1);
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const dir = uvToDir(u, v);
+
+      const d1 = angDistToGreatCircle(dir, P1);
+      const d2 = angDistToGreatCircle(dir, P2);
+      const m1 = seamMask(d1, SEAM_HALF_WIDTH_RAD, SEAM_EDGE_SOFT_RAD);
+      const m2 = seamMask(d2, SEAM_HALF_WIDTH_RAD, SEAM_EDGE_SOFT_RAD);
+      const seam = Math.min(1.0, m1 + m2);
+
+      // Base pores (mid-gray 128 +/- jitter)
+      let val = 128 + (Math.random() * (PORES_JITTER * 2) - PORES_JITTER);
+
+      // Emboss seam ridge (brighter = bumps outward)
+      val = Math.min(255, val + seam * SEAM_BUMP_HEIGHT);
+
+      const i = (y * w + x) << 2;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = val | 0;
+      img.data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/* -------------------- Exported API -------------------- */
 export function createHalfColorMaterial(pitchType) {
   const base = (pitchType || '').split(' ')[0];
   const accentHex = ({
@@ -40,10 +139,14 @@ export function createHalfColorMaterial(pitchType) {
     SV:'#ffffff', CS:'#ac8e68', FO:'#ffd60a'
   }[base] || '#ff3b30');
 
-  const bump = makeLeatherBump();
+  const map  = buildAlbedoTexture();
+  const bump = buildBumpTexture();
 
-  const mat = new THREE.MeshPhysicalMaterial({
-    color: new THREE.Color('#f2f2f2'),
+  return new THREE.MeshPhysicalMaterial({
+    map,
+    bumpMap: bump,
+    bumpScale: 0.035,                 // emboss strength
+    color: new THREE.Color('#ffffff'),
     roughness: 0.48,
     metalness: 0.0,
     sheen: 0.5,
@@ -51,74 +154,9 @@ export function createHalfColorMaterial(pitchType) {
     clearcoat: 0.25,
     clearcoatRoughness: 0.5,
     reflectivity: 0.34,
-    bumpMap: bump,
-    bumpScale: 0.03,
     emissive: new THREE.Color(accentHex),
     emissiveIntensity: 0.02
   });
-
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.seamColor   = { value: SEAM_COLOR.clone() };
-    shader.uniforms.seamWidth   = { value: SEAM_WIDTH_RAD };
-    shader.uniforms.p1          = { value: P1.clone() };
-    shader.uniforms.p2          = { value: P2.clone() };
-
-    // Pass world-space position of the vertex AND the ball center to fragment.
-    // Using world position ensures seams render correctly even when ball moves.
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `
-        #include <common>
-        varying vec3 vWorldPos;
-        varying vec3 vBallCenter;
-      `)
-      .replace('#include <worldpos_vertex>', `
-        #include <worldpos_vertex>
-        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vBallCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-      `);
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `
-        #include <common>
-        varying vec3 vWorldPos;
-        varying vec3 vBallCenter;
-        uniform vec3 seamColor;
-        uniform float seamWidth;
-        uniform vec3 p1;
-        uniform vec3 p2;
-
-        // Angular distance from a point on the unit sphere (dir) to a great circle
-        // defined by plane normal 'pn'. Great circle => all points where dot(dir, pn)==0.
-        float angDistToGreatCircle(vec3 dir, vec3 pn) {
-          return asin( abs( dot(dir, pn) ) );
-        }
-      `)
-      .replace('#include <output_fragment>', `
-        // Direction from ball center to this fragment, normalized (unit sphere param)
-        vec3 dir = normalize(vWorldPos - vBallCenter);
-
-        // Distance (radians) to each seam orbit
-        float a1 = angDistToGreatCircle(dir, normalize(p1));
-        float a2 = angDistToGreatCircle(dir, normalize(p2));
-
-        // Derivative AA so edges stay crisp across distances/angles
-        float aa1 = fwidth(a1);
-        float aa2 = fwidth(a2);
-        float m1 = 1.0 - smoothstep(seamWidth - aa1, seamWidth + aa1, a1);
-        float m2 = 1.0 - smoothstep(seamWidth - aa2, seamWidth + aa2, a2);
-        float seamMask = clamp(m1 + m2, 0.0, 1.0);
-
-        // Color blend
-        diffuseColor.rgb = mix(diffuseColor.rgb, seamColor, seamMask);
-
-        // Slight spec tweak on seams so highlights read
-        roughnessFactor = clamp( roughnessFactor + mix(0.0, -0.08, seamMask), 0.2, 1.0 );
-
-        #include <output_fragment>
-      `);
-  };
-
-  return mat;
 }
 
 export function getSpinAxisVector(degrees) {
