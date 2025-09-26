@@ -95,15 +95,9 @@
     }
     #metricsPanel b{ display:block; font-weight:700; margin-bottom:6px; color:#fff; }
 
-    #hint{
-      position:absolute; top:18px; left:50%; transform:translateX(-50%);
-      padding:10px 14px; font-size:12px;
-    }
-
     @media (max-width: 720px){
       #controls{ width: calc(100vw - 40px); left:20px; right:20px; }
       #metricsPanel{ display:none; }
-      #hint{ display:none; }
     }
   </style>
 </head>
@@ -139,7 +133,6 @@
   </div>
 
   <div id="metricsPanel" class="panel"></div>
-  <div id="hint" class="panel">To exit full screen, press and hold <b>esc</b></div>
 
   <script type="module" src="./main.js"></script>
 </body>
