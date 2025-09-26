@@ -11,7 +11,7 @@ const TEX = { w: 2048, h: 1024 };          // high-res equirect map
 const LEATHER = '#f2f2f2';
 const SEAM = {
   color: '#C91F24',
-  widthPx: 28,           // << thicker seam band (~5x). Try 24–36 to taste.
+  widthPx: 69,           // << thicker seam band (~5x). Try 24–36 to taste.
   amp: 0.20,             // sine amplitude as fraction of texture height
   softPx: 6,             // edge softness in pixels
   offsetFrac: 0.22       // seam vertical offset from midline (0..0.5)
