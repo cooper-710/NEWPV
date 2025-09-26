@@ -58,7 +58,7 @@ export function initScene() {
   // Mound (darker brown)
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9, 2.0, 64),
-    new THREE.MeshStandardMaterial({ color: 0x5a3e24, roughness: 0.95, metalness: 0.0 })
+    new THREE.MeshStandardMaterial({ color: 0x2f2015, roughness: 0.95, metalness: 0.0 })
   );
   mound.position.y = 0.0;
   mound.receiveShadow = true;
