@@ -1,100 +1,129 @@
 import * as THREE from 'three';
 
 /**
- * Baseball material with two thick, parallel seam bands (no cross).
- * - High-res CPU-baked map (no shader injection)
- * - Gentle sine curvature so seams feel like laces as the ball turns
- * - Leather pores + slight embossed ridge on seams via bump map
+ * Baseball material with ultra-smooth parallel seams using SDF:
+ * - Two sine-offset parallel bands; per-pixel distance -> smoothstep edge
+ * - High-res albedo + bump built on CPU (no shader hacks)
+ * - Proper mipmaps & anisotropy to stay crisp at grazing angles
  */
 
-const TEX = { w: 2048, h: 1024 };          // high-res equirect map
-const LEATHER = '#f2f2f2';
+const TEX = { w: 4096, h: 2048 };         // ↑ res to kill shimmer
+const LEATHER = [242, 242, 242];
+
 const SEAM = {
-  color: '#C91F24',
-  widthPx: 69,           // << thicker seam band (~5x). Try 24–36 to taste.
-  amp: 0.20,             // sine amplitude as fraction of texture height
-  softPx: 6,             // edge softness in pixels
-  offsetFrac: 0.22       // seam vertical offset from midline (0..0.5)
+  rgb: [201, 31, 36],   // #C91F24
+  widthPx: 30,          // core thickness (~5x). bump to 34–38 if you want more
+  softPx: 3.0,          // edge feather in pixels (anti-aliased edge)
+  ampFrac: 0.20,        // sine amplitude as fraction of height
+  offsetFrac: 0.22      // distance from midline for each parallel band (0..0.5)
 };
-// If you want stitches later, we can add them; keeping clean bands per request.
 
-function drawSeamBand(ctx, w, h, upper=true) {
-  // Centerline: y = y0 +/- A*sin(2πx/w)
-  const A = SEAM.amp * h;
-  const y0 = 0.5 * h + (upper ? -SEAM.offsetFrac*h : +SEAM.offsetFrac*h);
+const BUMP = {
+  poresJitter: 18,      // leather grain variance around 128
+  seamHeight: 22        // emboss height to catch specular
+};
 
-  // We’ll stroke a wide path with soft edge by painting multiple passes
-  const passes = Math.max(1, Math.floor(SEAM.softPx / 2));
-  for (let p = passes; p >= 0; p--) {
-    const lw = SEAM.widthPx + p * 2;         // thicker to thinner
-    const alpha = 0.22 + 0.78 * (1 - p / (passes + 1));
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = SEAM.color;
-    ctx.globalAlpha = alpha;
-    ctx.lineWidth = lw;
-
-    ctx.beginPath();
-    for (let x = 0; x <= w; x += 2) {
-      const y = y0 + A * Math.sin((2 * Math.PI * x) / w);
-      if (x === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
+// -------- distance helpers (in texture pixel space) ----------
+function seamCenterY(x, w, h, upper) {
+  const A = SEAM.ampFrac * h;
+  const y0 = 0.5 * h + (upper ? -SEAM.offsetFrac * h : +SEAM.offsetFrac * h);
+  return y0 + A * Math.sin((2 * Math.PI * x) / w);
+}
+function seamMaskSDF(distPx, halfWidth, soft) {
+  // 1.0 inside the band; 0.0 outside; smooth over 'soft' pixels
+  return 1.0 - THREE.MathUtils.smoothstep(distPx, halfWidth - soft, halfWidth + soft);
 }
 
-function makeAlbedo(w=TEX.w, h=TEX.h) {
-  const c = document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx = c.getContext('2d');
+// ---------------- build Albedo (SDF) ----------------
+function buildAlbedoTexture(w = TEX.w, h = TEX.h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const img = ctx.createImageData(w, h);
 
-  // Base leather
-  ctx.fillStyle = LEATHER; ctx.fillRect(0,0,w,h);
-  const g = ctx.createRadialGradient(w*0.5,h*0.5,h*0.12, w*0.5,h*0.5,h*0.70);
-  g.addColorStop(0,'rgba(0,0,0,0)');
-  g.addColorStop(1,'rgba(0,0,0,0.05)');
-  ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+  const [lr, lg, lb] = LEATHER;
+  const [sr, sg, sb] = SEAM.rgb;
 
-  // Two parallel seam bands (upper & lower), no crossing
-  drawSeamBand(ctx, w, h, true);
-  drawSeamBand(ctx, w, h, false);
+  const half = SEAM.widthPx * 0.5;
 
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // distance to each seam centerline (in pixels)
+      const yUp = seamCenterY(x, w, h, true);
+      const yDn = seamCenterY(x, w, h, false);
+      const dUp = Math.abs(y - yUp);
+      const dDn = Math.abs(y - yDn);
+
+      // seam coverage via SDF
+      const mUp = seamMaskSDF(dUp, half, SEAM.softPx);
+      const mDn = seamMaskSDF(dDn, half, SEAM.softPx);
+      const m = Math.min(1.0, mUp + mDn);
+
+      // subtle vignette to avoid flat look
+      const v = y / (h - 1);
+      const vign = 1.0 - 0.05 * Math.pow(2.0 * Math.abs(v - 0.5), 2.0);
+
+      let r = lr * vign, g = lg * vign, b = lb * vign;
+      r = r * (1 - m) + sr * m;
+      g = g * (1 - m) + sg * m;
+      b = b * (1 - m) + sb * m;
+
+      const i = (y * w + x) << 2;
+      img.data[i] = r | 0;
+      img.data[i + 1] = g | 0;
+      img.data[i + 2] = b | 0;
+      img.data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 16;
   return tex;
 }
 
-function makeBump(w=TEX.w, h=TEX.h) {
-  const c = document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx = c.getContext('2d');
+// ---------------- build Bump (SDF) ----------------
+function buildBumpTexture(w = TEX.w, h = TEX.h) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const img = ctx.createImageData(w, h);
 
-  // Fine leather pores
-  const img = ctx.createImageData(w,h);
-  for (let i=0;i<img.data.length;i+=4){
-    const n = 128 + (Math.random()*36 - 18);
-    img.data[i]=img.data[i+1]=img.data[i+2]=n; img.data[i+3]=255;
+  const half = SEAM.widthPx * 0.5;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const yUp = seamCenterY(x, w, h, true);
+      const yDn = seamCenterY(x, w, h, false);
+      const dUp = Math.abs(y - yUp);
+      const dDn = Math.abs(y - yDn);
+
+      // seam coverage via SDF (match albedo)
+      const mUp = seamMaskSDF(dUp, half, SEAM.softPx);
+      const mDn = seamMaskSDF(dDn, half, SEAM.softPx);
+      const m = Math.min(1.0, mUp + mDn);
+
+      // pores around mid-gray
+      let val = 128 + (Math.random() * (BUMP.poresJitter * 2) - BUMP.poresJitter);
+
+      // emboss the seam so specular highlights catch it
+      val = Math.min(255, val + m * BUMP.seamHeight);
+
+      const i = (y * w + x) << 2;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = val | 0;
+      img.data[i + 3] = 255;
+    }
   }
-  ctx.putImageData(img,0,0);
 
-  // Emboss the seam bands slightly so specular catches
-  ctx.globalAlpha = 0.35; ctx.strokeStyle = '#ffffff';
-  ctx.lineCap = 'round'; ctx.lineJoin='round';
-  // smaller core ridge
-  ctx.lineWidth = Math.max(1, SEAM.widthPx * 0.7);
-  drawSeamBand(ctx, w, h, true);
-  drawSeamBand(ctx, w, h, false);
-  // softer outer ridge
-  ctx.globalAlpha = 0.18; ctx.lineWidth = Math.max(1, SEAM.widthPx * 1.1);
-  drawSeamBand(ctx, w, h, true);
-  drawSeamBand(ctx, w, h, false);
-  ctx.globalAlpha = 1;
-
+  ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 8;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 16;
   return tex;
 }
 
@@ -107,13 +136,13 @@ export function createHalfColorMaterial(pitchType) {
     SV:'#ffffff', CS:'#ac8e68', FO:'#ffd60a'
   }[base] || '#ff3b30';
 
-  const map  = makeAlbedo();
-  const bump = makeBump();
+  const map  = buildAlbedoTexture();
+  const bump = buildBumpTexture();
 
   return new THREE.MeshPhysicalMaterial({
     map,
     bumpMap: bump,
-    bumpScale: 0.040,           // seam ridge strength
+    bumpScale: 0.040,                         // seam ridge strength
     color: new THREE.Color('#ffffff'),
     roughness: 0.48,
     metalness: 0.0,
@@ -123,7 +152,7 @@ export function createHalfColorMaterial(pitchType) {
     clearcoatRoughness: 0.5,
     reflectivity: 0.34,
     emissive: new THREE.Color(accent),
-    emissiveIntensity: 0.015    // tiny lift; keeps seams natural
+    emissiveIntensity: 0.012
   });
 }
 
