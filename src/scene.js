@@ -46,7 +46,7 @@ export function initScene() {
   plateLight.position.set(0, 3.0, -60.5);
   scene.add(plateLight);
 
-  // Ground — ultra-crisp procedural turf
+  // Ground — solid, darker turf
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(240, 240, 1, 1),
     createTurfMaterial()
@@ -55,7 +55,7 @@ export function initScene() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Mound (darker brown)
+  // Mound (kept as-is; adjust if you want even more saturation)
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9, 2.0, 64),
     new THREE.MeshStandardMaterial({ color: 0x5a3e24, roughness: 0.95, metalness: 0.0 })
