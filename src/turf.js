@@ -1,8 +1,8 @@
-// Procedural, PBR turf using MeshStandardMaterial with shader injection.
-// - Triplanar "mow" stripes (world-space; no UV stretching)
-// - Micro "fiber" normals from fbm noise
-// - Subtle roughness modulation so highlights feel organic
-// No external textures. Works at any distance without getting mushy.
+// Procedural, PBR turf using MeshStandardMaterial + safe shader injection.
+// - Triplanar mow stripes in WORLD space (no UV blur/stretch)
+// - Micro-fiber normals via fbm noise
+// - Subtle roughness variation for organic specular
+// No external textures. Works sharp at any zoom.
 
 import * as THREE from 'three';
 
@@ -14,28 +14,31 @@ export function createTurfMaterial() {
   });
 
   mat.onBeforeCompile = (shader) => {
-    // uniforms we can tweak from JS later if you want
-    shader.uniforms.turfDark = { value: new THREE.Color('#0a140e') };
-    shader.uniforms.turfLight = { value: new THREE.Color('#12251a') };
-    shader.uniforms.stripeScale = { value: 0.22 };   // smaller = wider stripes
-    shader.uniforms.noiseScale  = { value: 1.8 };    // fiber density
-    shader.uniforms.bumpAmp     = { value: 0.12 };   // normal intensity
-    shader.uniforms.roughAmp    = { value: 0.07 };   // roughness modulation
-    shader.uniforms.seed        = { value: Math.random() * 1000.0 };
+    // Uniforms for look tuning
+    shader.uniforms.turfDark   = { value: new THREE.Color('#0a140e') };
+    shader.uniforms.turfLight  = { value: new THREE.Color('#12251a') };
+    shader.uniforms.stripeScale= { value: 0.22 };  // smaller = wider stripes
+    shader.uniforms.noiseScale = { value: 1.8 };
+    shader.uniforms.bumpAmp    = { value: 0.12 };
+    shader.uniforms.roughAmp   = { value: 0.07 };
+    shader.uniforms.seed       = { value: Math.random() * 1000.0 };
 
-    // inject varyings for world-space triplanar
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `
-      #include <worldpos_vertex>
-      vWorldPosition = vec3( modelMatrix * vec4( transformed, 1.0 ) );
-      `
-    );
+    // ---- Add varying for world position (both shaders) ----
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `
+        #include <common>
+        varying vec3 vWorldPosition;
+      `)
+      .replace('#include <worldpos_vertex>', `
+        #include <worldpos_vertex>
+        vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+      `);
 
-    // helpers: hash, noise, fbm, and triplanar sampler
+    // ---- Utilities + uniforms + varying in fragment ----
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `
         #include <common>
+        varying vec3 vWorldPosition;
 
         uniform vec3 turfDark;
         uniform vec3 turfLight;
@@ -45,8 +48,8 @@ export function createTurfMaterial() {
         uniform float roughAmp;
         uniform float seed;
 
-        // hash / noise / fbm (cheap, branchless)
-        float hash(vec3 p){ p = fract(p*0.3183099 + vec3(0.1,0.2,0.3));
+        float hash(vec3 p){
+          p = fract(p*0.3183099 + vec3(0.1,0.2,0.3));
           p += dot(p, p.yzx+19.19);
           return fract((p.x+p.y)*p.z);
         }
@@ -77,26 +80,24 @@ export function createTurfMaterial() {
           s += a*noise3(p);
           return s;
         }
-
-        // triplanar weights
         vec3 triWeights(vec3 n){
           n = abs(n);
           n = max(n, 1e-5);
           return n / (n.x + n.y + n.z);
         }
-
-        // stripe pattern in a single axis plane
         float stripes(vec2 uv, float scale){
-          float v = sin(uv.y * 3.14159 / max(1e-4, scale));
-          // soft contrast; add a bit of noise to break banding
-          return 0.5 + 0.45 * v;
+          // Soft sine bands + a touch of anti-banding from floating-point noise downstream
+          return 0.5 + 0.45 * sin(uv.y * 3.14159 / max(1e-4, scale));
         }
       `)
+      // Inject our turf logic AFTER the engine computes base "normal"
       .replace('#include <normal_fragment_maps>', `
-        // Compute crisp turf color in world space using triplanar
-        vec3 wp = vWorldPosition * 0.5; // world scale control
-        vec3 nrm = normalize( geometryNormal );
-        vec3 w = triWeights(nrm);
+        #include <normal_fragment_maps>
+
+        // ----- WORLD-SPACE turf shading -----
+        vec3 wp  = vWorldPosition * 0.5;              // world scale control
+        vec3 nrm = normalize( geometryNormal );       // base geometric normal
+        vec3 w   = triWeights( nrm );                 // triplanar weights
 
         // Axis-aligned UVs
         vec2 uvx = wp.zy;
@@ -108,33 +109,27 @@ export function createTurfMaterial() {
         float sz = stripes(uvz, stripeScale);
         float sMix = sx*w.x + sy*w.y + sz*w.z;
 
-        // Base albedo (dark<->light) with stripe mix
+        // Albedo: dark<->light blend, then micro variation
         vec3 baseCol = mix(turfDark, turfLight, sMix);
-
-        // Micro-variation via fbm
         float n = fbm(wp * noiseScale + seed);
         baseCol *= 0.92 + 0.08 * n;
 
-        // Feed into outgoingDiffuse (pre-PBR)
+        // Write to diffuseColor (pre-PBR)
         diffuseColor.rgb = baseCol;
 
-        // ---------- Procedural normal (micro-fibers) ----------
-        // Use noise derivatives to perturb normal; keeps it view-independent.
-        float n1 = fbm(wp * (noiseScale*2.2) + 13.7);
-        float n2 = fbm(wp * (noiseScale*2.2) - 9.2);
-        vec3 t = normalize(vec3(0.0, 1.0, 0.0)); // up tangent proxy
+        // Micro-fiber normal perturbation using noise derivatives (tangent proxy)
+        vec3 t = normalize(vec3(0.0, 1.0, 0.0));
         vec3 b = normalize(cross(nrm, t)); t = normalize(cross(b, nrm));
-        vec3 micro = normalize(nrm + bumpAmp * ( (n1-0.5)*t + (n2-0.5)*b ));
-
+        float n1 = fbm(wp * (noiseScale*2.2) + 13.7);
+        float n2 = fbm(wp * (noiseScale*2.2) -  9.2);
+        vec3 micro = normalize(nrm + bumpAmp * ((n1-0.5)*t + (n2-0.5)*b));
         normal = micro;
 
-        // ---------- Roughness modulation ----------
+        // Roughness modulation for organic specular response
         roughnessFactor = clamp( roughnessFactor + (n-0.5)*roughAmp, 0.2, 1.0 );
-
-        // (We intentionally skip metalness modulation)
       `);
 
-    // keep reference for live edits if needed
+    // keep a handle for live tweaking if desired later
     mat.userData.shader = shader;
   };
 
