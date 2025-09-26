@@ -3,11 +3,11 @@ import * as THREE from 'three';
 /**
  * Physically-based baseball with shader-drawn seams:
  * - Two tilted great-circle seams (accurate spherical paths)
- * - Thick seam bands (tweak SEAM_WIDTH_RAD)
+ * - Thick seams (tune SEAM_WIDTH_RAD)
  * - Leather pores via procedural bump (no external images)
  */
 
-const SEAM_WIDTH_RAD = 0.14;                       // ~8° half-width (bold)
+const SEAM_WIDTH_RAD = 0.14;                       // ~8° half-width (bold; ~5×)
 const SEAM_COLOR     = new THREE.Color('#C91F24'); // seam red
 
 // Two seam plane normals (tilted so the paths look like real seams)
@@ -63,48 +63,55 @@ export function createHalfColorMaterial(pitchType) {
     shader.uniforms.p1          = { value: P1.clone() };
     shader.uniforms.p2          = { value: P2.clone() };
 
-    // pass world normal
+    // Pass world-space position of the vertex AND the ball center to fragment.
+    // Using world position ensures seams render correctly even when ball moves.
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `
         #include <common>
-        varying vec3 vNormalWorld;
+        varying vec3 vWorldPos;
+        varying vec3 vBallCenter;
       `)
-      .replace('#include <beginnormal_vertex>', `
-        #include <beginnormal_vertex>
-        vNormalWorld = normalize( mat3( modelMatrix ) * objectNormal );
+      .replace('#include <worldpos_vertex>', `
+        #include <worldpos_vertex>
+        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vBallCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
       `);
 
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `
         #include <common>
-        varying vec3 vNormalWorld;
+        varying vec3 vWorldPos;
+        varying vec3 vBallCenter;
         uniform vec3 seamColor;
         uniform float seamWidth;
         uniform vec3 p1;
         uniform vec3 p2;
 
-        // Angular distance from point on unit sphere to a great circle (plane pn)
-        float angDistToGreatCircle(vec3 n, vec3 pn) {
-          return asin( abs( dot(n, pn) ) ); // radians
+        // Angular distance from a point on the unit sphere (dir) to a great circle
+        // defined by plane normal 'pn'. Great circle => all points where dot(dir, pn)==0.
+        float angDistToGreatCircle(vec3 dir, vec3 pn) {
+          return asin( abs( dot(dir, pn) ) );
         }
       `)
       .replace('#include <output_fragment>', `
-        vec3 n = normalize(vNormalWorld);
+        // Direction from ball center to this fragment, normalized (unit sphere param)
+        vec3 dir = normalize(vWorldPos - vBallCenter);
 
-        float a1 = angDistToGreatCircle(n, normalize(p1));
-        float a2 = angDistToGreatCircle(n, normalize(p2));
+        // Distance (radians) to each seam orbit
+        float a1 = angDistToGreatCircle(dir, normalize(p1));
+        float a2 = angDistToGreatCircle(dir, normalize(p2));
 
-        // derivative AA so edges stay crisp
+        // Derivative AA so edges stay crisp across distances/angles
         float aa1 = fwidth(a1);
         float aa2 = fwidth(a2);
         float m1 = 1.0 - smoothstep(seamWidth - aa1, seamWidth + aa1, a1);
         float m2 = 1.0 - smoothstep(seamWidth - aa2, seamWidth + aa2, a2);
         float seamMask = clamp(m1 + m2, 0.0, 1.0);
 
-        // color mix
+        // Color blend
         diffuseColor.rgb = mix(diffuseColor.rgb, seamColor, seamMask);
 
-        // spec tweak on seams so highlights read
+        // Slight spec tweak on seams so highlights read
         roughnessFactor = clamp( roughnessFactor + mix(0.0, -0.08, seamMask), 0.2, 1.0 );
 
         #include <output_fragment>
