@@ -1,10 +1,9 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js';
 import { initScene, getRefs } from './src/scene.js';
 import { animateBalls } from './src/balls.js';
 import { initControls } from './src/ui.js';
 import { loadPitchData } from './src/data.js';
 
-// one-line UI style injection (kept from original)
+// minimal UI CSS injection (keeps index.html clean)
 const style = document.createElement('style');
 style.innerHTML = `
   #pitchCheckboxes{display:block;margin-top:16px;max-height:350px;overflow-y:auto}
@@ -13,7 +12,8 @@ style.innerHTML = `
   .checkbox-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;justify-items:center}
   .checkbox-group{display:flex;flex-direction:column-reverse;align-items:center;font-size:13px;gap:4px}
   .checkbox-group input[type="checkbox"]{transform:scale(1.2)}
-`; document.head.appendChild(style);
+`;
+document.head.appendChild(style);
 
 let playing = true;
 function setPlaying(updateFnOrBool) {
@@ -29,11 +29,9 @@ initControls(data, setPlaying);
 // render loop
 const { clock } = getRefs();
 let last = clock.getElapsedTime();
-
-function loop() {
+(function loop(){
   requestAnimationFrame(loop);
   const now = clock.getElapsedTime();
   const dt = now - last; last = now;
   if (playing) animateBalls(dt);
-}
-loop();
+})();
