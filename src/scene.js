@@ -32,7 +32,7 @@ export function createScene({ canvas, useShadows = true } = {}) {
   sun.shadow.camera.far = 120;
   scene.add(sun);
 
-  // Turf (solid dark green)
+  // Turf — exact swatch green (solid)
   const turf = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 400, 1, 1),
     createTurfMaterial()
@@ -42,11 +42,11 @@ export function createScene({ canvas, useShadows = true } = {}) {
   turf.receiveShadow = true;
   scene.add(turf);
 
-  // Mound — richer, more vibrant brown
+  // Mound — darker, more vibrant brown
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9.0, 2.0, 64),
     new THREE.MeshStandardMaterial({
-      color: new THREE.Color('#6b4328'), // deep brown, more saturation
+      color: new THREE.Color('#7A4A2F'), // vibrant brown
       roughness: 0.98,
       metalness: 0.0
     })
@@ -55,7 +55,7 @@ export function createScene({ canvas, useShadows = true } = {}) {
   mound.receiveShadow = true;
   scene.add(mound);
 
-  // Utility: handle resize
+  // Handle resize
   function onResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
