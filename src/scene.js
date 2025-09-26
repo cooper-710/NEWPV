@@ -78,7 +78,7 @@ export function initScene() {
     new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.42, 2.0)),
     new THREE.LineBasicMaterial({ color: 0xf2f2f2, transparent:true, opacity:0.9 })
   );
-  zone.position.set(0, 2.25, -60.5);
+  zone.position.set(0, 2.35, -60.5);
   scene.add(zone);
 
   // Plate
