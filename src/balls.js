@@ -34,19 +34,26 @@ export function addBall(pitch, pitchType) {
   );
   ball.castShadow = true;
 
-  // Prefer dataset's average velocity if provided (Statcast-style: mph)
-  // Fallback: derive from initial velocity vector (ft/s -> mph)
-  const v3dFtPerS = Math.sqrt((pitch.vx0||0)**2 + (pitch.vy0||0)**2 + (pitch.vz0||0)**2);
-  const mphFallback = v3dFtPerS * 0.681818; // 1 mph = 1.46667 ft/s
-  const mphDisplay = (typeof pitch.release_speed === 'number' && isFinite(pitch.release_speed))
-    ? pitch.release_speed
-    : mphFallback;
+  // ---- Velocity display (average) ----
+  // Your JSON 'release_speed' is Statcast-native (ft/s). Convert to mph.
+  const FT_PER_S_TO_MPH = 0.681818; // 1 ft/s = 0.681818 mph
+
+  let mphDisplay;
+  if (typeof pitch.release_speed === 'number' && isFinite(pitch.release_speed)) {
+    mphDisplay = pitch.release_speed * FT_PER_S_TO_MPH;
+  } else if (typeof pitch.release_speed_mph === 'number' && isFinite(pitch.release_speed_mph)) {
+    mphDisplay = pitch.release_speed_mph;
+  } else {
+    // Fallback: derive from initial components (ft/s -> mph)
+    const v3dFtPerS = Math.hypot(pitch.vx0 || 0, pitch.vy0 || 0, pitch.vz0 || 0);
+    mphDisplay = v3dFtPerS * FT_PER_S_TO_MPH;
+  }
 
   const t0 = clock.getElapsedTime();
   ball.userData = {
     type: pitchType,
     t0,
-    mphDisplay, // store once, use for metrics
+    mphDisplay, // store for metrics panel
     release:  { x: -pitch.release_pos_x, y: pitch.release_pos_z, z: -pitch.release_extension },
     velocity: { x: -pitch.vx0, y: pitch.vz0, z: pitch.vy0 },
     accel:    { x: -pitch.ax,  y: pitch.az,  z: pitch.ay  },
@@ -118,18 +125,21 @@ export function animateBalls(delta) {
     }
   }
 
-  // Cull old trail dots
+  // Cull trail dots older than ~10s
   trailDots = trailDots.filter(d => {
     if (now - d.t0 > 9.5) { scene.remove(d.mesh); return false; }
     return true;
   });
 
-  // Emit telemetry: use the last ball's stored average mph
+  // Telemetry to metrics panel (uses precomputed average mph)
   const last = balls[balls.length - 1];
   if (last) {
     Bus.emit('frameStats', {
       nBalls: balls.length,
-      last: { mph: +last.userData.mphDisplay.toFixed(1), spin: Math.round(last.userData.spinRate || 0) }
+      last: {
+        mph: +last.userData.mphDisplay.toFixed(1),
+        spin: Math.round(last.userData.spinRate || 0)
+      }
     });
   }
 
