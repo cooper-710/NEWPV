@@ -1,56 +1,49 @@
 import * as THREE from 'three';
 
 /**
- * Baseball material with ultra-smooth parallel seams baked in spherical space.
- * - Two parallel bands: φ_center = π/2 ± offset + amp * sin(2θ)
- * - SDF computed in radians (no UV-row distortion; no wrinkling)
- * - High-res albedo + bump; embossed seam for specular catch
+ * Baseball material with true figure-8 seams (single continuous curve on the sphere)
+ * and thinner stitches. Textures are generated procedurally for crisp results.
  */
 
-// Texture resolution (high to keep specular clean)
 const TEX_W = 4096, TEX_H = 2048;
 
-// Leather base
+// Leather & seam colors
 const LEATHER_RGB = [242, 242, 242];
+const SEAM_COLOR_RGB = [201, 31, 36]; // classic red
 
-// Seam parameters (radians for geometry-true edges)
-const SEAM_COLOR_RGB = [201, 31, 36]; // #C91F24
-const SEAM_HALF_WIDTH_RAD = 0.16;     // ~9° half-width (bold; bump to 0.18 if you want even thicker)
-const SEAM_SOFT_EDGE_RAD  = 0.010;    // ~0.6° feather for AA (keeps edges razor but stable)
-const SEAM_OFFSET_RAD     = 0.45;     // distance above/below equator (0..~0.6)
-const SEAM_AMP            = 0.22;     // sine “wobble” amplitude (0..~0.3)
+// --- seam controls (thinner + accurate figure-8 path) ---
+const FIG8_S_PARAM       = 0.38;  // controls “waist” of the figure-8 (0.30–0.45 looks authentic)
+const SEAM_WIDTH_SDF     = 0.030; // seam half-width in implicit-space (thinner than before)
+const SEAM_SOFT_SDF      = 0.010; // anti-alias feather in implicit-space
+const SEAM_EMBOSS_HEIGHT = 22;    // bump strength along seam
+const PORE_JITTER        = 18;    // random leather pores
 
-// Bump/pores
-const BUMP_PORE_JITTER = 18;          // 128 ± jitter
-const BUMP_SEAM_HEIGHT = 22;          // seam emboss intensity (0..255)
-
-/* ---------- spherical helpers ---------- */
-// Map (u∈[0,1], v∈[0,1]) -> spherical angles
-// θ: longitude in [-π, π], φ: colatitude in [0, π] (φ=0 is +Y)
+// spherical helpers
 function uvToAngles(u, v) {
   const theta = (u * 2.0 - 1.0) * Math.PI; // [-π, π]
   const phi   = v * Math.PI;               // [0, π]
   return { theta, phi };
 }
 
-// Signed angular distance from φ to the centerline φc(θ)
-function bandDistRad(theta, phi, phiCenter, amp) {
-  const center = phiCenter + amp * Math.sin(theta * 2.0);
-  return Math.abs(phi - center);
+/**
+ * Implicit figure-8 seam on a sphere.
+ * Level set f(theta, phi) = 0 traces the seam. Band |f| < width draws the seam area.
+ * f = sin(phi)*sin(2θ) - s*cos(phi)
+ */
+function fig8F(theta, phi, s = FIG8_S_PARAM) {
+  return Math.sin(phi) * Math.sin(2.0 * theta) - s * Math.cos(phi);
 }
 
-// SDF → 1 inside, 0 outside, smooth over ±soft
-function bandMask(distRad, halfWidthRad, softRad) {
-  // 1.0 when |dist| <= halfWidthRad, smooth transition in [W-soft, W+soft]
-  const a = halfWidthRad - softRad;
-  const b = halfWidthRad + softRad;
-  if (distRad <= a) return 1.0;
-  if (distRad >= b) return 0.0;
-  const t = (distRad - a) / (b - a);
-  return 1.0 - (t * t * (3.0 - 2.0 * t)); // smoothstep mirrored
+function bandMaskImplicit(f, w, soft) {
+  const af = Math.abs(f);
+  const a = w - soft;
+  const b = w + soft;
+  if (af <= a) return 1.0;
+  if (af >= b) return 0.0;
+  const t = (af - a) / (b - a);
+  return 1.0 - (t * t * (3.0 - 2.0 * t));
 }
 
-/* ---------- texture builders (albedo + bump) ---------- */
 function buildAlbedoTexture(w = TEX_W, h = TEX_H) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true });
@@ -65,21 +58,19 @@ function buildAlbedoTexture(w = TEX_W, h = TEX_H) {
       const u = x / (w - 1);
       const { theta, phi } = uvToAngles(u, v);
 
-      // Two parallel bands, above and below equator
-      const dUp = bandDistRad(theta, phi, (Math.PI * 0.5) - SEAM_OFFSET_RAD, SEAM_AMP);
-      const dDn = bandDistRad(theta, phi, (Math.PI * 0.5) + SEAM_OFFSET_RAD, SEAM_AMP);
+      // true baseball figure-8 (draw both lobes; implicit already gives both)
+      const f = fig8F(theta, phi);
+      const m = bandMaskImplicit(f, SEAM_WIDTH_SDF, SEAM_SOFT_SDF);
 
-      const mUp = bandMask(dUp, SEAM_HALF_WIDTH_RAD, SEAM_SOFT_EDGE_RAD);
-      const mDn = bandMask(dDn, SEAM_HALF_WIDTH_RAD, SEAM_SOFT_EDGE_RAD);
-      const m = Math.min(1.0, mUp + mDn);
-
-      // Gentle vignette so ball doesn’t read flat
+      // slight vignette to prevent flat read
       const vign = 1.0 - 0.05 * Math.pow(2.0 * Math.abs(v - 0.5), 2.0);
 
       let r = lr * vign, g = lg * vign, b = lb * vign;
-      r = r * (1 - m) + sr * m;
-      g = g * (1 - m) + sg * m;
-      b = b * (1 - m) + sb * m;
+      if (m > 0.0) {
+        r = r * (1 - m) + sr * m;
+        g = g * (1 - m) + sg * m;
+        b = b * (1 - m) + sb * m;
+      }
 
       const i = (y * w + x) << 2;
       img.data[i]     = r | 0;
@@ -110,18 +101,14 @@ function buildBumpTexture(w = TEX_W, h = TEX_H) {
       const u = x / (w - 1);
       const { theta, phi } = uvToAngles(u, v);
 
-      const dUp = bandDistRad(theta, phi, (Math.PI * 0.5) - SEAM_OFFSET_RAD, SEAM_AMP);
-      const dDn = bandDistRad(theta, phi, (Math.PI * 0.5) + SEAM_OFFSET_RAD, SEAM_AMP);
+      const f = fig8F(theta, phi);
+      const m = bandMaskImplicit(f, SEAM_WIDTH_SDF, SEAM_SOFT_SDF);
 
-      const mUp = bandMask(dUp, SEAM_HALF_WIDTH_RAD, SEAM_SOFT_EDGE_RAD);
-      const mDn = bandMask(dDn, SEAM_HALF_WIDTH_RAD, SEAM_SOFT_EDGE_RAD);
-      const m = Math.min(1.0, mUp + mDn);
+      // leather base around mid-gray with pores
+      let val = 128 + (Math.random() * (PORE_JITTER * 2) - PORE_JITTER);
 
-      // pores around mid-gray
-      let val = 128 + (Math.random() * (BUMP_PORE_JITTER * 2) - BUMP_PORE_JITTER);
-
-      // embossed ridge on seam
-      val = Math.min(255, val + m * BUMP_SEAM_HEIGHT);
+      // embossed ridge along seam
+      val = Math.min(255, val + m * SEAM_EMBOSS_HEIGHT);
 
       const i = (y * w + x) << 2;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = val | 0;
@@ -139,7 +126,6 @@ function buildBumpTexture(w = TEX_W, h = TEX_H) {
   return tex;
 }
 
-/* ---------- exported API ---------- */
 export function createHalfColorMaterial(pitchType) {
   const base = (pitchType || '').split(' ')[0];
   const accent = {
@@ -155,7 +141,7 @@ export function createHalfColorMaterial(pitchType) {
   return new THREE.MeshPhysicalMaterial({
     map,
     bumpMap: bump,
-    bumpScale: 0.040,                 // seam ridge strength
+    bumpScale: 0.040,
     color: new THREE.Color('#ffffff'),
     roughness: 0.48,
     metalness: 0.0,
