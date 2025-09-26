@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 
 export function createTurfMaterial() {
-  // Solid deep green with subtle micro variation and nice specular
+  // Deep, vibrant green — no stripes.
   const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color('#0f3a2b'), // darker + more saturated
+    color: new THREE.Color('#0f3a2b'), // dark + saturated
     roughness: 0.92,
-    metalness: 0.0
+    metalness: 0.0,
   });
 
-  // Tiny organic variation to avoid being “flat”
+  // Tiny organic variation so it doesn't look flat.
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTint = { value: new THREE.Color('#0f3a2b') };
     shader.uniforms.uNoiseAmp = { value: 0.03 };
@@ -45,13 +45,9 @@ export function createTurfMaterial() {
         }
       `)
       .replace('#include <output_fragment>', `
-        // base color from material
         vec3 base = diffuseColor.rgb;
-
-        // world-ish scale micro-shade using view-space pos (good enough)
         float n = noise3(vec3(gl_FragCoord.xy*0.002, 0.0));
         base = mix(base, base*1.06, n*uNoiseAmp);
-
         diffuseColor.rgb = base;
         #include <output_fragment>
       `);
