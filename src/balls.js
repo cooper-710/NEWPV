@@ -2,6 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.m
 import { createHalfColorMaterial, getSpinAxisVector } from './materials.js';
 import { pitchColorMap } from './constants.js';
 import { getRefs } from './scene.js';
+import { Bus } from './data.js';
 
 let balls = [];
 let trailDots = [];
@@ -111,6 +112,18 @@ export function animateBalls(delta) {
     if (now - d.t0 > 9.5) { scene.remove(d.mesh); return false; }
     return true;
   });
+
+  // emit telemetry (for metrics panel)
+  const last = balls[balls.length - 1];
+  if (last) {
+    const { velocity, spinRate } = last.userData;
+    const v3d = Math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2); // ft/s
+    const mph = v3d * 0.681818; // ft/s -> mph
+    Bus.emit('frameStats', {
+      nBalls: balls.length,
+      last: { mph: +mph.toFixed(1), spin: Math.round(spinRate || 0) }
+    });
+  }
 
   renderer.render(scene, camera);
 }
