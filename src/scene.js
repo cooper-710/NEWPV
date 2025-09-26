@@ -1,65 +1,82 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js';
+import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.148.0/examples/jsm/environments/RoomEnvironment.js';
 
 let scene, camera, renderer;
 const clock = new THREE.Clock();
 
 export function initScene() {
   const canvas = document.getElementById('three-canvas');
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x222222);
+  scene.background = new THREE.Color(0x16171a);
+  scene.fog = new THREE.Fog(0x16171a, 80, 160);
 
-  // mound
+  // Image-based lighting (no external assets)
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.12).texture;
+
+  // Camera
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+  camera.position.set(0, 2.6, -65);
+  camera.lookAt(0, 2.5, 0);
+  scene.add(camera);
+
+  // Key lights: soft, slightly warm key + cool fill
+  const key = new THREE.DirectionalLight(0xffe7d1, 2.0);
+  key.position.set(6, 12, 8);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.camera.near = 1; key.shadow.camera.far = 120;
+  scene.add(key);
+
+  const fill = new THREE.HemisphereLight(0xa7c8ff, 0x3f2e16, 0.6);
+  scene.add(fill);
+
+  const plateLight = new THREE.PointLight(0xffffff, 0.9, 120);
+  plateLight.position.set(0, 3.2, -60.5);
+  scene.add(plateLight);
+
+  // Mound
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9, 2.0, 64),
-    new THREE.MeshStandardMaterial({ color: 0x8B4513 })
+    new THREE.MeshStandardMaterial({ color: 0x8c6239, roughness: 0.9, metalness: 0.0 })
   );
+  mound.position.y = 0.0;
   mound.receiveShadow = true;
   scene.add(mound);
 
-  // rubber
+  // Rubber
   const rubber = new THREE.Mesh(
     new THREE.BoxGeometry(1, 0.05, 0.18),
-    new THREE.MeshStandardMaterial({ color: 0xffffff })
+    new THREE.MeshPhysicalMaterial({ color: 0xf2f2f2, roughness: 0.5, transmission: 0, clearcoat: 0.1 })
   );
   rubber.position.set(0, 1.05, 0);
   rubber.castShadow = true; rubber.receiveShadow = true;
   scene.add(rubber);
 
-  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
-  camera.position.set(0, 2.5, -65);
-  camera.lookAt(0, 2.5, 0);
-  scene.add(camera);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  scene.add(new THREE.HemisphereLight(0xb1e1ff, 0x8b4513, 0.4));
-
-  const sun = new THREE.DirectionalLight(0xfff0e5, 1.0);
-  sun.position.set(5,10,5);
-  sun.castShadow = true;
-  const target = new THREE.Object3D(); scene.add(target);
-  sun.target = target;
-  scene.add(sun);
-
-  const plateLight = new THREE.PointLight(0xffffff, 0.6, 100);
-  plateLight.position.set(0, 3, -60.5);
-  scene.add(plateLight);
-
+  // Ground (soft gradient using vertex colors)
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200),
-    new THREE.MeshStandardMaterial({ color: 0x1e472d, roughness: 1 })
+    new THREE.PlaneGeometry(240, 240, 1, 1),
+    new THREE.MeshStandardMaterial({ color: 0x1e7a45, roughness: 1, metalness: 0 })
   );
   ground.rotation.x = -Math.PI / 2;
+  ground.position.y = 0.0;
   ground.receiveShadow = true;
   scene.add(ground);
 
+  // Strike zone (thin glass frame)
   const zone = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.42, 2.0)),
-    new THREE.LineBasicMaterial({ color: 0xffffff })
+    new THREE.LineBasicMaterial({ color: 0xf2f2f2, transparent:true, opacity:0.9 })
   );
   zone.position.set(0, 2.5, -60.5);
   scene.add(zone);
@@ -68,10 +85,11 @@ export function initScene() {
   shape.moveTo(-0.85,0); shape.lineTo(0.85,0); shape.lineTo(0.85,0.5);
   shape.lineTo(0,1.0);   shape.lineTo(-0.85,0.5); shape.lineTo(-0.85,0);
   const plate = new THREE.Mesh(new THREE.ShapeGeometry(shape),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 })
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.6, clearcoat: 0.2 })
   );
   plate.rotation.x = -Math.PI / 2;
   plate.position.set(0, 0.011, -60.5);
+  plate.receiveShadow = true; plate.castShadow = false;
   scene.add(plate);
 
   window.addEventListener('resize', () => {
@@ -85,13 +103,13 @@ export function initScene() {
 
 export function setCameraView(view) {
   switch(view) {
-    case 'catcher':  camera.position.set(0, 2.5, -65); camera.lookAt(0, 2.5, 0); break;
-    case 'pitcher':  camera.position.set(0, 6.0, 5);   camera.lookAt(0, 2, -60.5); break;
-    case 'rhh':      camera.position.set(1, 4, -65);   camera.lookAt(0, 1.5, 0); break;
-    case 'lhh':      camera.position.set(-1, 4, -65);  camera.lookAt(0, 1.5, 0); break;
-    case '1b':       camera.position.set(50, 4.5, -30); camera.lookAt(0, 5, -30); break;
-    case '3b':       camera.position.set(-50, 4.5, -30); camera.lookAt(0, 5, -30); break;
+    case 'catcher':  camera.position.set(0, 2.6, -65); camera.lookAt(0, 2.5, 0); break;
+    case 'pitcher':  camera.position.set(0, 6.2, 5.5); camera.lookAt(0, 2, -60.5); break;
+    case 'rhh':      camera.position.set(1.2, 4.1, -65); camera.lookAt(0, 1.5, 0); break;
+    case 'lhh':      camera.position.set(-1.2, 4.1, -65); camera.lookAt(0, 1.5, 0); break;
+    case '1b':       camera.position.set(50, 4.8, -30); camera.lookAt(0, 5, -30); break;
+    case '3b':       camera.position.set(-50, 4.8, -30); camera.lookAt(0, 5, -30); break;
   }
 }
 
-export function getRefs() { return { scene, camera, renderer, clock }; }
+export function getRefs(){ return { scene, camera, renderer, clock }; }
