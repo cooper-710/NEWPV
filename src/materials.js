@@ -12,7 +12,7 @@ const LEATHER = [242, 242, 242];
 
 const SEAM = {
   rgb: [201, 31, 36],   // #C91F24
-  widthPx: 30,          // core thickness (~5x). bump to 34–38 if you want more
+  widthPx: 69,          // core thickness (~5x). bump to 34–38 if you want more
   softPx: 3.0,          // edge feather in pixels (anti-aliased edge)
   ampFrac: 0.20,        // sine amplitude as fraction of height
   offsetFrac: 0.22      // distance from midline for each parallel band (0..0.5)
