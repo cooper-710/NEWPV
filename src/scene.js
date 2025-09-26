@@ -58,7 +58,7 @@ export function initScene() {
   // Mound (kept as-is; adjust if you want even more saturation)
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9, 2.0, 64),
-    new THREE.MeshStandardMaterial({ color: 0x5a3e24, roughness: 0.95, metalness: 0.0 })
+    new THREE.MeshStandardMaterial({ color: 0x3B2415, roughness: 0.95, metalness: 0.0 })
   );
   mound.position.y = 0.0;
   mound.receiveShadow = true;
