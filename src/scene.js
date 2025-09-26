@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createTurfMaterial } from './turf.js';
 
-let _refs = null; // singleton cache
+let _refs = null; // singleton
 
 function _buildScene(canvas, { useShadows = true } = {}) {
   const scene = new THREE.Scene();
@@ -15,6 +15,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
     2000
   );
   camera.position.set(0, 12, 36);
+  camera.lookAt(0, 3, -60);
 
   // Renderer
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -39,7 +40,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
   sun.shadow.camera.far = 120;
   scene.add(sun);
 
-  // Turf — exact solid green
+  // Turf — solid exact green
   const turf = new THREE.Mesh(
     new THREE.PlaneGeometry(400, 400, 1, 1),
     createTurfMaterial()
@@ -58,7 +59,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
       metalness: 0.0
     })
   );
-  mound.position.set(0, 0.0, -60); // adjust if your world origin differs
+  mound.position.set(0, 0.0, -60);
   mound.receiveShadow = true;
   scene.add(mound);
 
@@ -70,39 +71,52 @@ function _buildScene(canvas, { useShadows = true } = {}) {
   }
   window.addEventListener('resize', onResize);
 
+  // Camera presets (match your UI labels)
+  const lookTarget = new THREE.Vector3(0, 3, -60);
+  const presets = {
+    'Home Plate View': () => { camera.position.set(0, 12, 36); camera.lookAt(lookTarget); },
+    'Centerfield View': () => { camera.position.set(0, 18, -110); camera.lookAt(lookTarget); },
+    'Pitcher View': () => { camera.position.set(0, 7, -48); camera.lookAt(lookTarget); },
+    'Umpire View': () => { camera.position.set(0, 9, 8); camera.lookAt(lookTarget); },
+    'Broadcast High': () => { camera.position.set(36, 32, 52); camera.lookAt(lookTarget); },
+  };
+
+  function setCameraView(name) {
+    const fn = presets[name] || presets['Home Plate View'];
+    fn();
+  }
+
   return {
     scene,
     camera,
     renderer,
     lights: { hemi, sun },
-    field: { turf, mound }
+    field: { turf, mound },
+    setCameraView,
   };
 }
 
-/**
- * Explicit builder if you call it from main.ts/js
- */
+/* Explicit builder */
 export function createScene({ canvas, useShadows = true } = {}) {
   _refs = _buildScene(canvas, { useShadows });
   return _refs;
 }
 
-/**
- * Backward-compatible accessor used by your existing modules (e.g., balls.js).
- * If nothing was built yet, it finds #three-canvas and builds the scene.
- */
+/* Back-compat accessor some modules call */
 export function getRefs() {
   if (_refs) return _refs;
-
   const canvas =
     document.getElementById('three-canvas') ||
     document.querySelector('canvas');
-
   if (!canvas) {
-    throw new Error(
-      'getRefs(): no canvas found. Ensure <canvas id="three-canvas"> exists or call createScene({ canvas }) first.'
-    );
+    throw new Error('getRefs(): no canvas found. Ensure <canvas id="three-canvas"> exists or call createScene({ canvas }) first.');
   }
   _refs = _buildScene(canvas, { useShadows: true });
   return _refs;
+}
+
+/* Exported for ui.js */
+export function setCameraView(name) {
+  const refs = getRefs();
+  refs.setCameraView(name);
 }
