@@ -28,19 +28,30 @@ export function setTrailVisible(on) {
 export function addBall(pitch, pitchType) {
   const { scene, clock } = getRefs();
 
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.145, 32, 32),
-                              createHalfColorMaterial(pitchType));
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(0.145, 32, 32),
+    createHalfColorMaterial(pitchType)
+  );
   ball.castShadow = true;
+
+  // Prefer dataset's average velocity if provided (Statcast-style: mph)
+  // Fallback: derive from initial velocity vector (ft/s -> mph)
+  const v3dFtPerS = Math.sqrt((pitch.vx0||0)**2 + (pitch.vy0||0)**2 + (pitch.vz0||0)**2);
+  const mphFallback = v3dFtPerS * 0.681818; // 1 mph = 1.46667 ft/s
+  const mphDisplay = (typeof pitch.release_speed === 'number' && isFinite(pitch.release_speed))
+    ? pitch.release_speed
+    : mphFallback;
 
   const t0 = clock.getElapsedTime();
   ball.userData = {
     type: pitchType,
     t0,
-    release: { x: -pitch.release_pos_x, y: pitch.release_pos_z, z: -pitch.release_extension },
+    mphDisplay, // store once, use for metrics
+    release:  { x: -pitch.release_pos_x, y: pitch.release_pos_z, z: -pitch.release_extension },
     velocity: { x: -pitch.vx0, y: pitch.vz0, z: pitch.vy0 },
     accel:    { x: -pitch.ax,  y: pitch.az,  z: pitch.ay  },
     spinRate: pitch.release_spin_rate || 0,
-    spinAxis: getSpinAxisVector(pitch.spin_axis || 0)
+    spinAxis: getSpinAxisVector(pitch.spin_axis || 0),
   };
 
   ball.position.set(ball.userData.release.x, ball.userData.release.y, ball.userData.release.z);
@@ -107,21 +118,18 @@ export function animateBalls(delta) {
     }
   }
 
-  // cull trails > ~10s
+  // Cull old trail dots
   trailDots = trailDots.filter(d => {
     if (now - d.t0 > 9.5) { scene.remove(d.mesh); return false; }
     return true;
   });
 
-  // emit telemetry (for metrics panel)
+  // Emit telemetry: use the last ball's stored average mph
   const last = balls[balls.length - 1];
   if (last) {
-    const { velocity, spinRate } = last.userData;
-    const v3d = Math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2); // ft/s
-    const mph = v3d * 0.681818; // ft/s -> mph
     Bus.emit('frameStats', {
       nBalls: balls.length,
-      last: { mph: +mph.toFixed(1), spin: Math.round(spinRate || 0) }
+      last: { mph: +last.userData.mphDisplay.toFixed(1), spin: Math.round(last.userData.spinRate || 0) }
     });
   }
 
