@@ -1,78 +1,9 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createTurfMaterial } from './turf.js';
 
 let scene, camera, renderer;
 const clock = new THREE.Clock();
-
-/* ---------- Procedural turf (darker, subtler stripes) ---------- */
-function makeGrassAlbedo(size = 1024, stripes = 22) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  const ctx = c.getContext('2d');
-
-  // deep neutral green with slight corner falloff
-  const g = ctx.createRadialGradient(size*0.55, size*0.45, size*0.1, size*0.5, size*0.55, size*0.8);
-  g.addColorStop(0, '#0d1c13');  // center
-  g.addColorStop(1, '#07110b');  // edges
-  ctx.fillStyle = g; ctx.fillRect(0,0,size,size);
-
-  // mow stripes (very subtle so the ball stays the focus)
-  const stripeH = size / stripes;
-  for (let i=0;i<stripes;i++){
-    const y = i*stripeH;
-    ctx.fillStyle = (i%2===0) ? 'rgba(255,255,255,0.018)' : 'rgba(0,0,0,0.018)';
-    ctx.fillRect(0, y, size, stripeH);
-  }
-
-  // organic speckle (darker and rarer than before)
-  const img = ctx.getImageData(0,0,size,size);
-  for (let p=0; p<img.data.length; p+=4){
-    const r = Math.random();
-    let d = 0;
-    if (r < 0.010) d = 18;
-    else if (r < 0.020) d = -18;
-    img.data[p]   = Math.min(255, Math.max(0, img.data[p]   + d));
-    img.data[p+1] = Math.min(255, Math.max(0, img.data[p+1] + d));
-    img.data[p+2] = Math.min(255, Math.max(0, img.data[p+2] + d));
-  }
-  ctx.putImageData(img,0,0);
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2.5, 2.5);
-  tex.anisotropy = 4;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function makeGrassBump(size = 512) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(size,size);
-
-  // fine noise
-  for (let i=0;i<img.data.length;i+=4){
-    const n = 120 + (Math.random()*50 - 25);
-    img.data[i]=img.data[i+1]=img.data[i+2]=n; img.data[i+3]=255;
-  }
-  ctx.putImageData(img,0,0);
-
-  // micro “fiber” streaks
-  ctx.globalAlpha = 0.09;
-  ctx.strokeStyle = '#ffffff';
-  for (let k=0;k<650;k++){
-    const x = Math.random()*size, y = Math.random()*size;
-    ctx.beginPath(); ctx.moveTo(x, y);
-    ctx.lineTo(x + 5 + Math.random()*12, y + (Math.random()-0.5)*2);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(7, 7);
-  return tex;
-}
-/* --------------------------------------------------------------- */
 
 export function initScene() {
   const canvas = document.getElementById('three-canvas');
@@ -100,7 +31,7 @@ export function initScene() {
   camera.lookAt(0, 2.5, 0);
   scene.add(camera);
 
-  // Lighting (slightly dimmer to avoid washing the turf)
+  // Lighting
   const key = new THREE.DirectionalLight(0xffe3c6, 1.8);
   key.position.set(6, 12, 8);
   key.castShadow = true;
@@ -115,10 +46,19 @@ export function initScene() {
   plateLight.position.set(0, 3.0, -60.5);
   scene.add(plateLight);
 
+  // Ground — ultra-crisp procedural turf
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(240, 240, 1, 1),
+    createTurfMaterial()
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
   // Mound (darker brown)
   const mound = new THREE.Mesh(
     new THREE.CylinderGeometry(2.0, 9, 2.0, 64),
-    new THREE.MeshStandardMaterial({ color: 0x5a3e24, roughness: 0.95, metalness: 0.0 }) // darker
+    new THREE.MeshStandardMaterial({ color: 0x5a3e24, roughness: 0.95, metalness: 0.0 })
   );
   mound.position.y = 0.0;
   mound.receiveShadow = true;
@@ -132,24 +72,6 @@ export function initScene() {
   rubber.position.set(0, 1.05, 0);
   rubber.castShadow = true; rubber.receiveShadow = true;
   scene.add(rubber);
-
-  // Ground: darker, realistic turf
-  const grassMap  = makeGrassAlbedo();
-  const grassBump = makeGrassBump();
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(240, 240, 1, 1),
-    new THREE.MeshStandardMaterial({
-      map: grassMap,
-      bumpMap: grassBump,
-      bumpScale: 0.08,      // a hair stronger
-      roughness: 0.95,
-      metalness: 0.0
-    })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = 0.0;
-  ground.receiveShadow = true;
-  scene.add(ground);
 
   // Strike zone
   const zone = new THREE.LineSegments(
