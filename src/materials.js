@@ -15,7 +15,7 @@ const LEATHER_RGB = [242, 242, 242];
 
 // Seam parameters (radians for geometry-true edges)
 const SEAM_COLOR_RGB = [201, 31, 36]; // #C91F24
-const SEAM_HALF_WIDTH_RAD = 0.16;     // ~9° half-width (bold; bump to 0.18 if you want even thicker)
+const SEAM_HALF_WIDTH_RAD = 0.08;     // ~9° half-width (bold; bump to 0.18 if you want even thicker)
 const SEAM_SOFT_EDGE_RAD  = 0.010;    // ~0.6° feather for AA (keeps edges razor but stable)
 const SEAM_OFFSET_RAD     = 0.45;     // distance above/below equator (0..~0.6)
 const SEAM_AMP            = 0.22;     // sine “wobble” amplitude (0..~0.3)
