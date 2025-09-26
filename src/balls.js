@@ -1,4 +1,4 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.module.js';
+import * as THREE from 'three';
 import { createHalfColorMaterial, getSpinAxisVector } from './materials.js';
 import { pitchColorMap } from './constants.js';
 import { getRefs } from './scene.js';
