@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { createTurfMaterial } from './turf.js';
 
-let _refs = null;            // singleton cache of scene bits
-let _raf = null;             // optional render loop handle
+let _refs = null;
+let _raf = null;
 
 function _buildScene(canvas, { useShadows = true } = {}) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#0e0f11');
+
+  // Clock (so main.js can call refs.clock.getElapsedTime())
+  const clock = new THREE.Clock();
 
   // Camera
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
@@ -36,7 +39,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
   sun.shadow.camera.far = 120;
   scene.add(sun);
 
-  // Turf (solid exact green from turf.js)
+  // Turf (solid exact green)
   const turf = new THREE.Mesh(new THREE.PlaneGeometry(400, 400, 1, 1), createTurfMaterial());
   turf.rotation.x = -Math.PI / 2;
   turf.position.y = 0;
@@ -48,7 +51,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
     new THREE.CylinderGeometry(2.0, 9.0, 2.0, 64),
     new THREE.MeshStandardMaterial({ color: new THREE.Color('#7A4A2F'), roughness: 0.98, metalness: 0.0 })
   );
-  mound.position.set(0, 0.0, -60);   // adjust if your world origin differs
+  mound.position.set(0, 0.0, -60);
   mound.receiveShadow = true;
   scene.add(mound);
 
@@ -60,7 +63,7 @@ function _buildScene(canvas, { useShadows = true } = {}) {
   }
   window.addEventListener('resize', onResize);
 
-  // Camera presets used by UI
+  // Camera presets for UI
   const lookTarget = new THREE.Vector3(0, 3, -60);
   const presets = {
     'Home Plate View': () => { camera.position.set(0, 12, 36);   camera.lookAt(lookTarget); },
@@ -69,7 +72,6 @@ function _buildScene(canvas, { useShadows = true } = {}) {
     'Umpire View': () => { camera.position.set(0, 9, 8);         camera.lookAt(lookTarget); },
     'Broadcast High': () => { camera.position.set(36, 32, 52);   camera.lookAt(lookTarget); },
   };
-
   function setCameraView(name) {
     (presets[name] || presets['Home Plate View'])();
   }
@@ -78,47 +80,37 @@ function _buildScene(canvas, { useShadows = true } = {}) {
     scene,
     camera,
     renderer,
+    clock,                 // <-- expose the clock
     lights: { hemi, sun },
     field: { turf, mound },
     setCameraView,
   };
 }
 
-/** Explicit builder some modules call */
+/* Explicit builder */
 export function createScene({ canvas, useShadows = true } = {}) {
   _refs = _buildScene(canvas, { useShadows });
   return _refs;
 }
 
-/** Back-compat accessor many modules call */
+/* Back-compat accessor */
 export function getRefs() {
   if (_refs) return _refs;
-  const canvas =
-    document.getElementById('three-canvas') ||
-    document.querySelector('canvas');
+  const canvas = document.getElementById('three-canvas') || document.querySelector('canvas');
   if (!canvas) throw new Error('getRefs(): no canvas found. Ensure <canvas id="three-canvas"> exists or call createScene({ canvas }) first.');
   _refs = _buildScene(canvas, { useShadows: true });
   return _refs;
 }
 
-/** Exported for ui.js */
+/* For ui.js */
 export function setCameraView(name) {
   const refs = getRefs();
   refs.setCameraView(name);
 }
 
-/**
- * NEW: initScene — for main.js legacy import.
- * Accepts:
- *   - nothing: auto-grab #three-canvas
- *   - HTMLCanvasElement
- *   - { canvas, useShadows?, startLoop? }
- * Returns refs { scene, camera, renderer, ... }.
- * If startLoop === true, starts a basic render loop (you can still render elsewhere).
- */
+/* For main.js legacy import */
 export function initScene(arg) {
   let canvas = null, useShadows = true, startLoop = false;
-
   if (!arg) {
     canvas = document.getElementById('three-canvas') || document.querySelector('canvas');
   } else if (arg instanceof HTMLCanvasElement) {
@@ -128,16 +120,16 @@ export function initScene(arg) {
     if (typeof arg.useShadows === 'boolean') useShadows = arg.useShadows;
     if (arg.startLoop === true) startLoop = true;
   }
-
   if (!canvas) throw new Error('initScene(): no canvas found or provided.');
 
   const refs = createScene({ canvas, useShadows });
 
-  // Optional simple render loop
   if (startLoop) {
     if (_raf) cancelAnimationFrame(_raf);
     const tick = () => {
       _raf = requestAnimationFrame(tick);
+      // example usage of clock here (harmless if main.js also uses it)
+      const _t = refs.clock.getElapsedTime();
       refs.renderer.render(refs.scene, refs.camera);
     };
     tick();
