@@ -138,21 +138,13 @@ export function initControls(data, setPlaying) {
 
   trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
-  // live metrics
+  // live metrics (no FPS)
   metricsPanel.style.display = 'block';
-  let lastFpsTS = performance.now(), frames = 0, fps = 0;
   Bus.on('frameStats', (s) => {
-    frames++;
-    const now = performance.now();
-    if (now - lastFpsTS > 500) { // half-second window
-      fps = Math.round(frames * 1000 / (now - lastFpsTS));
-      lastFpsTS = now; frames = 0;
-    }
     metricsPanel.innerHTML =
       `<b>Metrics</b><br>
        Balls: ${s.nBalls}<br>
-       Last: ${s.last.mph} mph • ${s.last.spin} rpm<br>
-       FPS: ${fps}`;
+       Velo: ${s.last.mph} mph • ${s.last.spin} rpm`;
   });
 
   // init from URL (if present), else defaults
