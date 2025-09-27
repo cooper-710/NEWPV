@@ -102,11 +102,13 @@ function metricsFromDatum(d) {
   const ivb  = trackmanIVBInches(d);
 
   // HB (no gravity on X). Prefer inch-native, else convert ft → in.
-  const hb   = getVal(d, [
+  const hbRaw = getVal(d, [
     'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'horizontal_break',
     ['pfx_x', 1],
     ['movement_horizontal', 12], ['movement_horizontal_ft', 12]
   ]);
+  const hb = hbRaw === undefined ? undefined : -hbRaw;   // flip the sign
+
 
   return { mph, spin, ivb, hb };
 }
