@@ -1,4 +1,4 @@
-import { clearBalls, addBall, removeBallByType, setTrailVisible, replayAll } from './balls.js';
+import { clearBalls, clearTrails, addBall, removeBallByType, setTrailVisible, replayAll } from './balls.js';
 import { setCameraView } from './scene.js';
 import { Bus } from './data.js';
 
@@ -251,15 +251,10 @@ export function initControls(data, setPlaying) {
 
   cameraSelect.addEventListener('change', (e) => { setCameraView(e.target.value); _writeUrl(); });
 
-  replayBtn.addEventListener('click', () => {
-    Bus.emit('clearTrails');  // tell the rendering code to wipe all trail points
-    replayAll();              // then replay as usual
-  });
+  import { clearTrails, replayAll } from './balls.js';
+  // ...
+  replayBtn.addEventListener('click', () => { clearTrails(); replayAll(); });
 
-  toggleBtn.addEventListener('click', () => {
-    const next = setPlaying(prev => !prev);
-    toggleBtn.textContent = next ? 'Pause' : 'Play';
-  });
 
   trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
