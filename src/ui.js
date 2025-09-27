@@ -4,6 +4,47 @@ import { Bus } from './data.js';
 
 let _state = { team: null, pitcher: null };
 
+function fmt(v, d = 1) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
+  const n = Number(v);
+  return (Math.abs(n) >= 1000) ? Math.round(n).toString() : n.toFixed(d);
+}
+
+function pick(...keys) {
+  for (const k of keys) {
+    if (k !== undefined && k !== null) return k;
+  }
+  return undefined;
+}
+
+function buildMetricsPanel(el) {
+  el.innerHTML = `
+    <div class="metrics-title">Metrics</div>
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">Velo</div>
+        <div class="metric-value" id="m-velo">--</div>
+        <div class="metric-unit">mph</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Spin</div>
+        <div class="metric-value" id="m-spin">--</div>
+        <div class="metric-unit">rpm</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">IVB</div>
+        <div class="metric-value" id="m-ivb">--</div>
+        <div class="metric-unit">in</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">HB</div>
+        <div class="metric-value" id="m-hb">--</div>
+        <div class="metric-unit">in</div>
+      </div>
+    </div>
+  `;
+}
+
 export function buildPitchCheckboxes(pitcherData) {
   const container = document.getElementById('pitchCheckboxes');
   container.innerHTML = '';
@@ -78,7 +119,6 @@ export function buildPitchCheckboxes(pitcherData) {
     container.appendChild(group);
   });
 
-  // Clear All
   const clr = document.createElement('button');
   clr.textContent = 'Clear All';
   clr.addEventListener('click', () => {
@@ -101,7 +141,6 @@ export function initControls(data, setPlaying) {
   const trailToggle   = document.getElementById('trailToggle');
   const metricsPanel  = document.getElementById('metricsPanel');
 
-  // teams
   for (const team in data) {
     const opt = document.createElement('option');
     opt.value = team; opt.textContent = team;
@@ -138,19 +177,27 @@ export function initControls(data, setPlaying) {
 
   trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
-  // live metrics (no FPS)
-  metricsPanel.style.display = 'block';
+  buildMetricsPanel(metricsPanel);
+
   Bus.on('frameStats', (s) => {
-    metricsPanel.innerHTML =
-      `<b>Metrics</b><br>
-       Velo: ${s.last.mph} mph 
-       Spin: ${s.last.spin} rpm
-       IVB: ${s.last.ivb} in
-       HB: ${s.last.hb} in`
-       ;
+    const last = s && s.last ? s.last : {};
+
+    const mph = pick(last.mph, last.velocity, last.vel);
+    const spin = pick(last.spin, last.rpm);
+    const ivb = pick(
+      last.ivb, last.ivb_in, last.ivb_inches, last.vb, last.vertBreak, last.inducedVerticalBreak, last.vz_break
+    );
+    const hb = pick(
+      last.hb, last.hb_in, last.hb_inches, last.hbreak, last.horizontalBreak, last.vx_break
+    );
+
+    const e = (id) => document.getElementById(id);
+    e('m-velo').textContent = fmt(mph, 1);
+    e('m-spin').textContent = fmt(spin, 0);
+    e('m-ivb').textContent  = fmt(ivb, 1);
+    e('m-hb').textContent   = fmt(hb, 1);
   });
 
-  // init from URL (if present), else defaults
   const params = new URLSearchParams(location.search);
   const wantTeam = params.get('team');
   const wantPitcher = params.get('pitcher');
