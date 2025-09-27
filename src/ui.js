@@ -78,7 +78,6 @@ export function buildPitchCheckboxes(pitcherData) {
     container.appendChild(group);
   });
 
-  // Clear All
   const clr = document.createElement('button');
   clr.textContent = 'Clear All';
   clr.addEventListener('click', () => {
@@ -101,7 +100,6 @@ export function initControls(data, setPlaying) {
   const trailToggle   = document.getElementById('trailToggle');
   const metricsPanel  = document.getElementById('metricsPanel');
 
-  // teams
   for (const team in data) {
     const opt = document.createElement('option');
     opt.value = team; opt.textContent = team;
@@ -138,16 +136,49 @@ export function initControls(data, setPlaying) {
 
   trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
-  // live metrics (no FPS)
+  // ---- Metrics panel (glassmorphism + velo, spin, horiz/vert movement) ----
   metricsPanel.style.display = 'block';
+  metricsPanel.classList.add('panel', 'glass', 'metrics');
+
+  const fmt = (v, d = 1) => {
+    if (v === undefined || v === null || Number.isNaN(Number(v))) return '—';
+    const n = Number(v);
+    const p = Math.abs(n) < 10 ? d : 1;
+    return n.toFixed(p);
+  };
+
   Bus.on('frameStats', (s) => {
+    const last = s?.last || {};
+    const mph  = last.mph ?? last.velo ?? last.velocity;
+    const spin = last.spin ?? last.spin_rate ?? last.rpm;
+
+    // Be resilient to key naming: movement_horizontal/movement_vertical, hmov/vmov, hb/ivb, etc.
+    const hmov = last.movement_horizontal ?? last.hmov ?? last.hbreak ?? last.hb ?? last.horizontal_break;
+    const vmov = last.movement_vertical   ?? last.vmov ?? last.ivb   ?? last.vert_break ?? last.vertical_break;
+
     metricsPanel.innerHTML =
-      `<b>Metrics</b><br>
-       Balls: ${s.nBalls}<br>
-       Velo: ${s.last.mph} mph • ${s.last.spin} rpm`;
+      `<div class="metrics-header">Metrics</div>
+       <div class="metrics-grid">
+         <div class="metric">
+           <div class="metric-label">Velo</div>
+           <div class="metric-value">${fmt(mph, 1)}<span class="metric-unit"> mph</span></div>
+         </div>
+         <div class="metric">
+           <div class="metric-label">Spin</div>
+           <div class="metric-value">${fmt(spin, 0)}<span class="metric-unit"> rpm</span></div>
+         </div>
+         <div class="metric">
+           <div class="metric-label">Horiz. Move</div>
+           <div class="metric-value">${fmt(hmov, 1)}<span class="metric-unit"> in</span></div>
+         </div>
+         <div class="metric">
+           <div class="metric-label">Vert. Move</div>
+           <div class="metric-value">${fmt(vmov, 1)}<span class="metric-unit"> in</span></div>
+         </div>
+       </div>`;
   });
 
-  // init from URL (if present), else defaults
+  // ---- init from URL
   const params = new URLSearchParams(location.search);
   const wantTeam = params.get('team');
   const wantPitcher = params.get('pitcher');
