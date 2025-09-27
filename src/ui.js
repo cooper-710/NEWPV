@@ -251,7 +251,14 @@ export function initControls(data, setPlaying) {
 
   cameraSelect.addEventListener('change', (e) => { setCameraView(e.target.value); _writeUrl(); });
 
-  replayBtn.addEventListener('click', replayAll);
+  replayBtn.addEventListener('click', () => {
+    if (trailToggle.checked) {
+      trailToggle.checked = false;      // flip the UI switch
+      setTrailVisible(false);           // hide/remove trails in the scene
+    }
+    if (Bus.emit) Bus.emit('clearTrails'); // (optional) notify render code to purge any cached trail points
+    replayAll();                         // run your existing replay
+  });
 
   toggleBtn.addEventListener('click', () => {
     const next = setPlaying(prev => !prev);
