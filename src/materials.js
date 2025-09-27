@@ -13,7 +13,7 @@ const SEAM_COLOR_RGB = [201, 31, 36]; // classic red
 
 // --- seam controls (thinner + accurate figure-8 path) ---
 const FIG8_S_PARAM       = 0.38;  // controls “waist” of the figure-8 (0.30–0.45 looks authentic)
-const SEAM_WIDTH_SDF     = 0.10; // seam half-width in implicit-space (thinner than before)
+const SEAM_WIDTH_SDF     = 0.2; // seam half-width in implicit-space (thinner than before)
 const SEAM_SOFT_SDF      = 0.010; // anti-alias feather in implicit-space
 const SEAM_EMBOSS_HEIGHT = 22;    // bump strength along seam
 const PORE_JITTER        = 18;    // random leather pores
