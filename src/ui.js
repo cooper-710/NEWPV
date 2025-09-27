@@ -1,44 +1,30 @@
-// ui.js — metrics upgrade + glass styling match + resilient data keys
-
 import { clearBalls, addBall, removeBallByType, replayAll, setTrailVisible } from './balls.js';
 import { setCameraView } from './scene.js';
-import { Bus } from './data.js';
 
 let _state = { team: null, pitcher: null };
 
-// ===== Utilities =====
+// ---------- Metrics ----------
+const metricsPanel = document.getElementById('metricsPanel');
+metricsPanel.style.display = 'block';
+metricsPanel.classList.add('panel');
+
 const fmt = (v, d = 1) => {
   if (v === undefined || v === null || Number.isNaN(Number(v))) return '—';
   return Number(v).toFixed(d);
 };
 const ftpsToMph = (ftps) => Number(ftps) / 1.4666667;
 
-// ===== Metrics Panel =====
-const metricsPanel = document.getElementById('metricsPanel');
-metricsPanel.style.display = 'block';
-metricsPanel.classList.add('panel'); // glass look already defined in HTML
-
 function renderMetrics(raw) {
   if (!raw) return;
 
-  // Pull values with robust fallbacks (matching your JSON screenshot)
-  const spinRaw =
-    raw.release_spin_rate ?? raw.spin_rate ?? raw.spin ?? null;
+  const spinRaw = raw.release_spin_rate ?? raw.spin_rate ?? raw.spin ?? null;
+  const speedRaw = raw.release_speed ?? raw.mph ?? raw.velo ?? raw.velocity ?? null;
+  const mph = speedRaw != null
+    ? (Number(speedRaw) > 120 ? ftpsToMph(speedRaw) : Number(speedRaw))
+    : null;
 
-  const speedRaw =
-    raw.release_speed ?? raw.mph ?? raw.velo ?? raw.velocity ?? null;
-
-  // Convert if release_speed was in ft/s (Statcast-style)
-  const mph =
-    speedRaw != null
-      ? (Number(speedRaw) > 120 ? ftpsToMph(speedRaw) : Number(speedRaw))
-      : null;
-
-  const hMove =
-    raw.movement_horizontal ?? raw.hmov ?? raw.hb ?? raw.horizontal_break ?? null;
-
-  const vMove =
-    raw.movement_vertical ?? raw.vmov ?? raw.ivb ?? raw.vertical_break ?? null;
+  const hMove = raw.movement_horizontal ?? raw.hmov ?? raw.hb ?? raw.horizontal_break ?? null;
+  const vMove = raw.movement_vertical   ?? raw.vmov ?? raw.ivb ?? raw.vertical_break ?? null;
 
   metricsPanel.innerHTML = `
     <div class="metrics-header">Metrics</div>
@@ -63,23 +49,25 @@ function renderMetrics(raw) {
   `;
 }
 
-// Public helper: call this anywhere you have the active pitch sample
-export function setMetricsFromPitch(raw) {
-  renderMetrics(raw);
-}
+// Public helper so other modules can push a pitch object
+export function setMetricsFromPitch(raw) { renderMetrics(raw); }
 
-// Keep live-updating if your app emits frame/pitch events
-if (Bus && typeof Bus.on === 'function') {
-  // Prefer s.last, fallback to s
-  Bus.on('frameStats', (s) => renderMetrics(s?.last || s));
-}
+// Try to subscribe if a Bus is available (non-fatal if not)
+(async () => {
+  try {
+    const mod = await import('./data.js');
+    const Bus = mod?.Bus;
+    if (Bus && typeof Bus.on === 'function') {
+      Bus.on('frameStats', (s) => renderMetrics(s?.last || s));
+    }
+  } catch (_) {}
+})();
 
-// ===== Pitch Checkbox Builder =====
+// ---------- Pitch Checkbox Builder ----------
 export function buildPitchCheckboxes(pitcherData) {
   const container = document.getElementById('pitchCheckboxes');
   container.innerHTML = '';
 
-  // Group by pitch type -> zone
   const pitchGroups = {};
   for (const key in pitcherData) {
     const [type, zoneStr] = key.split(' ');
@@ -124,8 +112,7 @@ export function buildPitchCheckboxes(pitcherData) {
         if (cb.checked) {
           const sample = pitchGroups[type][zone];
           addBall(sample, combo);
-          // Immediately reflect selected pitch metrics
-          setMetricsFromPitch(sample);
+          setMetricsFromPitch(sample); // show metrics immediately
         } else {
           removeBallByType(combo);
         }
@@ -169,7 +156,7 @@ export function buildPitchCheckboxes(pitcherData) {
   container.appendChild(clr);
 }
 
-// ===== Control Wiring =====
+// ---------- Controls ----------
 export function initControls(data, setPlaying) {
   const teamSelect    = document.getElementById('teamSelect');
   const pitcherSelect = document.getElementById('pitcherSelect');
@@ -178,7 +165,6 @@ export function initControls(data, setPlaying) {
   const toggleBtn     = document.getElementById('toggleBtn');
   const trailToggle   = document.getElementById('trailToggle');
 
-  // Populate teams
   for (const team in data) {
     const opt = document.createElement('option');
     opt.value = team; opt.textContent = team;
@@ -188,7 +174,6 @@ export function initControls(data, setPlaying) {
   teamSelect.addEventListener('change', () => {
     pitcherSelect.innerHTML = '';
     _state.team = teamSelect.value;
-
     for (const p in data[_state.team]) {
       const opt = document.createElement('option');
       opt.value = p; opt.textContent = p;
@@ -204,7 +189,6 @@ export function initControls(data, setPlaying) {
     buildPitchCheckboxes(data[_state.team][_state.pitcher]);
     _writeUrl();
 
-    // Prime metrics from the first available pitch in this pitcher’s data (if any)
     const firstKey = Object.keys(data[_state.team][_state.pitcher])[0];
     if (firstKey) renderMetrics(data[_state.team][_state.pitcher][firstKey]);
   });
@@ -226,12 +210,11 @@ export function initControls(data, setPlaying) {
     _writeUrl();
   });
 
-  // ---- init from URL
   const params = new URLSearchParams(location.search);
-  const wantTeam   = params.get('team');
-  const wantPitcher= params.get('pitcher');
-  const wantView   = params.get('view');
-  const wantTrail  = params.get('trail');
+  const wantTeam    = params.get('team');
+  const wantPitcher = params.get('pitcher');
+  const wantView    = params.get('view');
+  const wantTrail   = params.get('trail');
 
   if (wantTeam && data[wantTeam]) {
     teamSelect.value = wantTeam;
