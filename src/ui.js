@@ -67,6 +67,31 @@ function renderMetrics({ mph, spin, ivb, hb }) {
   e('m-hb').textContent   = fmt(hb, 1);
 }
 
+// --------- TrackMan IVB from datum (gravity removed) ----------
+function trackmanIVBInches(d) {
+  // Use explicit IVB if present (already inches, positive = ride)
+  const explicit = getVal(d, ['inducedVerticalBreak', 'ivb', 'ivb_in', 'ivb_inches']);
+  if (explicit !== undefined) return Number(explicit);
+
+  // Otherwise compute: IVB = gravity_drop - total_drop
+  // total_drop from your JSON is movement_vertical (ft) → inches
+  const totalDropIn = (() => {
+    const mvIn = getVal(d, [['movement_vertical', 12], ['movement_vertical_ft', 12], 'vertical_movement_in', 'total_vertical_break_in']);
+    return mvIn === undefined ? undefined : Math.abs(mvIn);
+  })();
+
+  const t = pick(d.time_to_plate, d.timeToPlate, d.tt); // seconds
+  if (totalDropIn !== undefined && t !== undefined) {
+    const g = 32.174; // ft/s^2
+    const gravityDropIn = 0.5 * g * (Number(t) ** 2) * 12;
+    return gravityDropIn - totalDropIn; // + = ride, - = extra drop
+  }
+
+  // Last resort: spin-only vertical deflection from Statcast-style fields (already inches)
+  const pfxZ = getVal(d, ['pfx_z', 'vz_break', 'vertBreak']);
+  return pfxZ;
+}
+
 // derive metrics from a raw datum (your JSON object for a pitch)
 function metricsFromDatum(d) {
   if (!d) return { mph: undefined, spin: undefined, ivb: undefined, hb: undefined };
@@ -74,14 +99,11 @@ function metricsFromDatum(d) {
   const mph  = pick(d.mph, d.velocity, d.vel, d.release_speed);
   const spin = pick(d.spin, d.rpm, d.release_spin_rate);
 
-  // prefer inch-native fields, else convert feet → inches
-  const ivb = getVal(d, [
-    'ivb', 'ivb_in', 'ivb_inches', 'inducedVerticalBreak', 'vertBreak', 'vz_break', 'vertical_break',
-    ['pfx_z', 1],
-    ['movement_vertical', 12], ['movement_vertical_ft', 12]
-  ]);
-  const hb  = getVal(d, [
-    'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'vx_break', 'horizontal_break',
+  const ivb  = trackmanIVBInches(d);
+
+  // HB (no gravity on X). Prefer inch-native, else convert ft → in.
+  const hb   = getVal(d, [
+    'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'horizontal_break',
     ['pfx_x', 1],
     ['movement_horizontal', 12], ['movement_horizontal_ft', 12]
   ]);
@@ -136,14 +158,12 @@ export function buildPitchCheckboxes(pitcherData) {
 
       cb.addEventListener('change', () => {
         if (cb.checked) {
-          // add to scene and set metrics to this datum
           const datum = pitchGroups[type][zone];
           addBall(datum, combo);
           _lastDatum = datum;
           renderMetrics(metricsFromDatum(_lastDatum));
         } else {
           removeBallByType(combo);
-          // if the unchecked one was the "current", clear it
           if (_lastDatum === pitchGroups[type][zone]) {
             _lastDatum = null;
             renderMetrics({ mph: undefined, spin: undefined, ivb: undefined, hb: undefined });
@@ -240,7 +260,7 @@ export function initControls(data, setPlaying) {
 
   buildMetricsPanel(metricsPanel);
 
-  // Live updates from animation loop: mph/spin only in your feed.
+  // Live updates for mph/spin; IVB/HB come from selected datum
   let loggedKeysOnce = false;
   Bus.on('frameStats', (s) => {
     const last = s && s.last ? s.last : {};
@@ -250,7 +270,6 @@ export function initControls(data, setPlaying) {
       loggedKeysOnce = true;
     }
 
-    // Prefer live mph/spin if present; keep IVB/HB from selected datum.
     const liveMph  = pick(last.mph, last.velocity, last.vel, last.release_speed);
     const liveSpin = pick(last.spin, last.rpm, last.release_spin_rate);
 
