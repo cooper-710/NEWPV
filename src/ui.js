@@ -17,6 +17,7 @@ function pick(...keys) {
   return undefined;
 }
 
+// candidates can be "key" or ["key", multiplier]
 function getVal(obj, candidates) {
   for (const c of candidates) {
     if (Array.isArray(c)) {
@@ -191,19 +192,35 @@ export function initControls(data, setPlaying) {
 
   buildMetricsPanel(metricsPanel);
 
+  let loggedKeysOnce = false;
   Bus.on('frameStats', (s) => {
     const last = s && s.last ? s.last : {};
 
-    const mph  = pick(last.mph, last.velocity, last.vel);
-    const spin = pick(last.spin, last.rpm);
+    // Log the fields once so you can verify what the feed provides
+    if (!loggedKeysOnce) {
+      try {
+        console.debug('[metrics] frameStats.last keys:', Object.keys(last).sort());
+      } catch (_) {}
+      loggedKeysOnce = true;
+    }
 
+    const mph  = pick(last.mph, last.velocity, last.vel, last.release_speed);
+    const spin = pick(last.spin, last.rpm, last.release_spin_rate);
+
+    // IVB/HB in inches: prefer inch-native fields first,
+    // else convert feet-based fields (movement_* ft → in)
     const ivb = getVal(last, [
-      'ivb', 'ivb_in', 'ivb_inches', 'vb', 'vertBreak', 'inducedVerticalBreak', 'vz_break',
-      ['movement_vertical', 12]
+      'ivb', 'ivb_in', 'ivb_inches', 'inducedVerticalBreak', 'vertBreak', 'vz_break', 'vertical_break',
+      ['pfx_z', 1],                // Statcast induced break in inches (+ up, - down)
+      ['movement_vertical', 12],   // feet → inches
+      ['movement_vertical_ft', 12]
     ]);
+
     const hb  = getVal(last, [
-      'hb', 'hb_in', 'hb_inches', 'hbreak', 'horizontalBreak', 'vx_break',
-      ['movement_horizontal', 12]
+      'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'vx_break', 'horizontal_break',
+      ['pfx_x', 1],                // Statcast horizontal break in inches (+ arm-side for RHP)
+      ['movement_horizontal', 12], // feet → inches
+      ['movement_horizontal_ft', 12]
     ]);
 
     const e = (id) => document.getElementById(id);
