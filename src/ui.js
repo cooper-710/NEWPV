@@ -17,6 +17,18 @@ function pick(...keys) {
   return undefined;
 }
 
+function getVal(obj, candidates) {
+  for (const c of candidates) {
+    if (Array.isArray(c)) {
+      const [k, mul = 1] = c;
+      if (obj[k] !== undefined && obj[k] !== null) return Number(obj[k]) * mul;
+    } else {
+      if (obj[c] !== undefined && obj[c] !== null) return Number(obj[c]);
+    }
+  }
+  return undefined;
+}
+
 function buildMetricsPanel(el) {
   el.innerHTML = `
     <div class="metrics-title">Metrics</div>
@@ -182,14 +194,17 @@ export function initControls(data, setPlaying) {
   Bus.on('frameStats', (s) => {
     const last = s && s.last ? s.last : {};
 
-    const mph = pick(last.mph, last.velocity, last.vel);
+    const mph  = pick(last.mph, last.velocity, last.vel);
     const spin = pick(last.spin, last.rpm);
-    const ivb = pick(
-      last.ivb, last.ivb_in, last.ivb_inches, last.vb, last.vertBreak, last.inducedVerticalBreak, last.vz_break
-    );
-    const hb = pick(
-      last.hb, last.hb_in, last.hb_inches, last.hbreak, last.horizontalBreak, last.vx_break
-    );
+
+    const ivb = getVal(last, [
+      'ivb', 'ivb_in', 'ivb_inches', 'vb', 'vertBreak', 'inducedVerticalBreak', 'vz_break',
+      ['movement_vertical', 12]
+    ]);
+    const hb  = getVal(last, [
+      'hb', 'hb_in', 'hb_inches', 'hbreak', 'horizontalBreak', 'vx_break',
+      ['movement_horizontal', 12]
+    ]);
 
     const e = (id) => document.getElementById(id);
     e('m-velo').textContent = fmt(mph, 1);
