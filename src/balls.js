@@ -16,12 +16,17 @@ export function clearBalls() {
   balls = [];
 }
 
+// NEW: explicit trail clearer (doesn't touch toggle)
+export function clearTrails() {
+  const { scene } = getRefs();
+  for (const d of trailDots) scene.remove(d.mesh);
+  trailDots = [];
+}
+
 export function setTrailVisible(on) {
   showTrail = !!on;
   if (!showTrail) {
-    const { scene } = getRefs();
-    for (const d of trailDots) scene.remove(d.mesh);
-    trailDots = [];
+    clearTrails(); // use the central clearer
   }
 }
 
@@ -34,9 +39,7 @@ export function addBall(pitch, pitchType) {
   );
   ball.castShadow = true;
 
-  // ---- Velocity display (average) ----
-  // Your JSON 'release_speed' is Statcast-native (ft/s). Convert to mph.
-  const FT_PER_S_TO_MPH = 0.681818; // 1 ft/s = 0.681818 mph
+  const FT_PER_S_TO_MPH = 0.681818;
 
   let mphDisplay;
   if (typeof pitch.release_speed === 'number' && isFinite(pitch.release_speed)) {
@@ -44,7 +47,6 @@ export function addBall(pitch, pitchType) {
   } else if (typeof pitch.release_speed_mph === 'number' && isFinite(pitch.release_speed_mph)) {
     mphDisplay = pitch.release_speed_mph;
   } else {
-    // Fallback: derive from initial components (ft/s -> mph)
     const v3dFtPerS = Math.hypot(pitch.vx0 || 0, pitch.vy0 || 0, pitch.vz0 || 0);
     mphDisplay = v3dFtPerS * FT_PER_S_TO_MPH;
   }
@@ -53,7 +55,7 @@ export function addBall(pitch, pitchType) {
   ball.userData = {
     type: pitchType,
     t0,
-    mphDisplay, // store for metrics panel
+    mphDisplay,
     release:  { x: -pitch.release_pos_x, y: pitch.release_pos_z, z: -pitch.release_extension },
     velocity: { x: -pitch.vx0, y: pitch.vz0, z: pitch.vy0 },
     accel:    { x: -pitch.ax,  y: pitch.az,  z: pitch.ay  },
@@ -85,11 +87,15 @@ export function removeBallByType(pitchType) {
 export function replayAll() {
   const { clock } = getRefs();
   const now = clock.getElapsedTime();
+
+  // wipe existing trail but keep toggle state
+  clearTrails();
+
   for (const b of balls) {
     b.userData.t0 = now;
     b.position.set(b.userData.release.x, b.userData.release.y, b.userData.release.z);
   }
-  setTrailVisible(showTrail);
+  // leave showTrail as-is; new dots start accumulating if toggle is on
 }
 
 export function animateBalls(delta) {
@@ -145,3 +151,6 @@ export function animateBalls(delta) {
 
   renderer.render(scene, camera);
 }
+
+// Optional: also respond to a bus event if you emit it from the UI
+Bus.on?.('clearTrails', clearTrails);
