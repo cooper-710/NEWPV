@@ -251,10 +251,7 @@ export function initControls(data, setPlaying) {
 
   cameraSelect.addEventListener('change', (e) => { setCameraView(e.target.value); _writeUrl(); });
 
-  import { clearTrails, replayAll } from './balls.js';
-  // ...
   replayBtn.addEventListener('click', () => { clearTrails(); replayAll(); });
-
 
   trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
 
