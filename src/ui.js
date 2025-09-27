@@ -143,8 +143,11 @@ export function initControls(data, setPlaying) {
   Bus.on('frameStats', (s) => {
     metricsPanel.innerHTML =
       `<b>Metrics</b><br>
-       Balls: ${s.nBalls}<br>
-       Velo: ${s.last.mph} mph spin: ${s.last.spin} rpm`;
+       Velo: ${s.last.mph} mph 
+       Spin: ${s.last.spin} rpm
+       IVB: ${s.last.ivb} in
+       HB: ${s.last.hb} in`
+       ;
   });
 
   // init from URL (if present), else defaults
