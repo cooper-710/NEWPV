@@ -144,7 +144,7 @@ export function initControls(data, setPlaying) {
     metricsPanel.innerHTML =
       `<b>Metrics</b><br>
        Balls: ${s.nBalls}<br>
-       Velo: ${s.last.mph} mph ${s.last.spin} rpm`;
+       Velo: ${s.last.mph} mph rpm: ${s.last.spin} rpm`;
   });
 
   // init from URL (if present), else defaults
