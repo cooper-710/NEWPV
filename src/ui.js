@@ -1,69 +1,9 @@
-import { clearBalls, addBall, removeBallByType, replayAll, setTrailVisible } from './balls.js';
+import { clearBalls, addBall, removeBallByType, setTrailVisible, replayAll } from './balls.js';
 import { setCameraView } from './scene.js';
+import { Bus } from './data.js';
 
 let _state = { team: null, pitcher: null };
 
-// ---------- Metrics ----------
-const metricsPanel = document.getElementById('metricsPanel');
-metricsPanel.style.display = 'block';
-metricsPanel.classList.add('panel');
-
-const fmt = (v, d = 1) => {
-  if (v === undefined || v === null || Number.isNaN(Number(v))) return '—';
-  return Number(v).toFixed(d);
-};
-const ftpsToMph = (ftps) => Number(ftps) / 1.4666667;
-
-function renderMetrics(raw) {
-  if (!raw) return;
-
-  const spinRaw = raw.release_spin_rate ?? raw.spin_rate ?? raw.spin ?? null;
-  const speedRaw = raw.release_speed ?? raw.mph ?? raw.velo ?? raw.velocity ?? null;
-  const mph = speedRaw != null
-    ? (Number(speedRaw) > 120 ? ftpsToMph(speedRaw) : Number(speedRaw))
-    : null;
-
-  const hMove = raw.movement_horizontal ?? raw.hmov ?? raw.hb ?? raw.horizontal_break ?? null;
-  const vMove = raw.movement_vertical   ?? raw.vmov ?? raw.ivb ?? raw.vertical_break ?? null;
-
-  metricsPanel.innerHTML = `
-    <div class="metrics-header">Metrics</div>
-    <div class="metrics-grid">
-      <div class="metric">
-        <div class="metric-label">Velo</div>
-        <div class="metric-value">${fmt(mph, 1)}<span class="metric-unit"> mph</span></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Spin</div>
-        <div class="metric-value">${fmt(spinRaw, 0)}<span class="metric-unit"> rpm</span></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Horiz. Move</div>
-        <div class="metric-value">${fmt(hMove, 1)}<span class="metric-unit"> in</span></div>
-      </div>
-      <div class="metric">
-        <div class="metric-label">Vert. Move</div>
-        <div class="metric-value">${fmt(vMove, 1)}<span class="metric-unit"> in</span></div>
-      </div>
-    </div>
-  `;
-}
-
-// Public helper so other modules can push a pitch object
-export function setMetricsFromPitch(raw) { renderMetrics(raw); }
-
-// Try to subscribe if a Bus is available (non-fatal if not)
-(async () => {
-  try {
-    const mod = await import('./data.js');
-    const Bus = mod?.Bus;
-    if (Bus && typeof Bus.on === 'function') {
-      Bus.on('frameStats', (s) => renderMetrics(s?.last || s));
-    }
-  } catch (_) {}
-})();
-
-// ---------- Pitch Checkbox Builder ----------
 export function buildPitchCheckboxes(pitcherData) {
   const container = document.getElementById('pitchCheckboxes');
   container.innerHTML = '';
@@ -109,13 +49,8 @@ export function buildPitchCheckboxes(pitcherData) {
       cb.id = combo;
 
       cb.addEventListener('change', () => {
-        if (cb.checked) {
-          const sample = pitchGroups[type][zone];
-          addBall(sample, combo);
-          setMetricsFromPitch(sample); // show metrics immediately
-        } else {
-          removeBallByType(combo);
-        }
+        if (cb.checked) addBall(pitchGroups[type][zone], combo);
+        else removeBallByType(combo);
       });
 
       const label = document.createElement('label');
@@ -143,6 +78,7 @@ export function buildPitchCheckboxes(pitcherData) {
     container.appendChild(group);
   });
 
+  // Clear All
   const clr = document.createElement('button');
   clr.textContent = 'Clear All';
   clr.addEventListener('click', () => {
@@ -156,7 +92,6 @@ export function buildPitchCheckboxes(pitcherData) {
   container.appendChild(clr);
 }
 
-// ---------- Controls ----------
 export function initControls(data, setPlaying) {
   const teamSelect    = document.getElementById('teamSelect');
   const pitcherSelect = document.getElementById('pitcherSelect');
@@ -164,7 +99,9 @@ export function initControls(data, setPlaying) {
   const replayBtn     = document.getElementById('replayBtn');
   const toggleBtn     = document.getElementById('toggleBtn');
   const trailToggle   = document.getElementById('trailToggle');
+  const metricsPanel  = document.getElementById('metricsPanel');
 
+  // teams
   for (const team in data) {
     const opt = document.createElement('option');
     opt.value = team; opt.textContent = team;
@@ -188,15 +125,9 @@ export function initControls(data, setPlaying) {
     clearBalls();
     buildPitchCheckboxes(data[_state.team][_state.pitcher]);
     _writeUrl();
-
-    const firstKey = Object.keys(data[_state.team][_state.pitcher])[0];
-    if (firstKey) renderMetrics(data[_state.team][_state.pitcher][firstKey]);
   });
 
-  cameraSelect.addEventListener('change', (e) => {
-    setCameraView(e.target.value);
-    _writeUrl();
-  });
+  cameraSelect.addEventListener('change', (e) => { setCameraView(e.target.value); _writeUrl(); });
 
   replayBtn.addEventListener('click', replayAll);
 
@@ -205,16 +136,23 @@ export function initControls(data, setPlaying) {
     toggleBtn.textContent = next ? 'Pause' : 'Play';
   });
 
-  trailToggle.addEventListener('change', e => {
-    setTrailVisible(e.target.checked);
-    _writeUrl();
+  trailToggle.addEventListener('change', e => { setTrailVisible(e.target.checked); _writeUrl(); });
+
+  // live metrics (no FPS)
+  metricsPanel.style.display = 'block';
+  Bus.on('frameStats', (s) => {
+    metricsPanel.innerHTML =
+      `<b>Metrics</b><br>
+       Balls: ${s.nBalls}<br>
+       Velo: ${s.last.mph} mph â€¢ ${s.last.spin} rpm`;
   });
 
+  // init from URL (if present), else defaults
   const params = new URLSearchParams(location.search);
-  const wantTeam    = params.get('team');
+  const wantTeam = params.get('team');
   const wantPitcher = params.get('pitcher');
-  const wantView    = params.get('view');
-  const wantTrail   = params.get('trail');
+  const wantView = params.get('view');
+  const wantTrail = params.get('trail');
 
   if (wantTeam && data[wantTeam]) {
     teamSelect.value = wantTeam;
