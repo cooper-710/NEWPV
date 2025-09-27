@@ -3,22 +3,23 @@ import { setCameraView } from './scene.js';
 import { Bus } from './data.js';
 
 let _state = { team: null, pitcher: null };
+let _lastDatum = null; // currently selected pitch datum (from JSON)
 
+// ---------- helpers ----------
 function fmt(v, d = 1) {
   if (v === null || v === undefined || Number.isNaN(Number(v))) return '--';
   const n = Number(v);
   return (Math.abs(n) >= 1000) ? Math.round(n).toString() : n.toFixed(d);
 }
-
 function pick(...keys) {
   for (const k of keys) {
     if (k !== undefined && k !== null) return k;
   }
   return undefined;
 }
-
-// candidates can be "key" or ["key", multiplier]
+// candidates: "key" or ["key", multiplier]
 function getVal(obj, candidates) {
+  if (!obj) return undefined;
   for (const c of candidates) {
     if (Array.isArray(c)) {
       const [k, mul = 1] = c;
@@ -58,6 +59,37 @@ function buildMetricsPanel(el) {
   `;
 }
 
+function renderMetrics({ mph, spin, ivb, hb }) {
+  const e = (id) => document.getElementById(id);
+  e('m-velo').textContent = fmt(mph, 1);
+  e('m-spin').textContent = fmt(spin, 0);
+  e('m-ivb').textContent  = fmt(ivb, 1);
+  e('m-hb').textContent   = fmt(hb, 1);
+}
+
+// derive metrics from a raw datum (your JSON object for a pitch)
+function metricsFromDatum(d) {
+  if (!d) return { mph: undefined, spin: undefined, ivb: undefined, hb: undefined };
+
+  const mph  = pick(d.mph, d.velocity, d.vel, d.release_speed);
+  const spin = pick(d.spin, d.rpm, d.release_spin_rate);
+
+  // prefer inch-native fields, else convert feet → inches
+  const ivb = getVal(d, [
+    'ivb', 'ivb_in', 'ivb_inches', 'inducedVerticalBreak', 'vertBreak', 'vz_break', 'vertical_break',
+    ['pfx_z', 1],
+    ['movement_vertical', 12], ['movement_vertical_ft', 12]
+  ]);
+  const hb  = getVal(d, [
+    'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'vx_break', 'horizontal_break',
+    ['pfx_x', 1],
+    ['movement_horizontal', 12], ['movement_horizontal_ft', 12]
+  ]);
+
+  return { mph, spin, ivb, hb };
+}
+
+// ---------- UI builders ----------
 export function buildPitchCheckboxes(pitcherData) {
   const container = document.getElementById('pitchCheckboxes');
   container.innerHTML = '';
@@ -103,8 +135,20 @@ export function buildPitchCheckboxes(pitcherData) {
       cb.id = combo;
 
       cb.addEventListener('change', () => {
-        if (cb.checked) addBall(pitchGroups[type][zone], combo);
-        else removeBallByType(combo);
+        if (cb.checked) {
+          // add to scene and set metrics to this datum
+          const datum = pitchGroups[type][zone];
+          addBall(datum, combo);
+          _lastDatum = datum;
+          renderMetrics(metricsFromDatum(_lastDatum));
+        } else {
+          removeBallByType(combo);
+          // if the unchecked one was the "current", clear it
+          if (_lastDatum === pitchGroups[type][zone]) {
+            _lastDatum = null;
+            renderMetrics({ mph: undefined, spin: undefined, ivb: undefined, hb: undefined });
+          }
+        }
       });
 
       const label = document.createElement('label');
@@ -141,6 +185,8 @@ export function buildPitchCheckboxes(pitcherData) {
         cb.dispatchEvent(new Event('change'));
       }
     });
+    _lastDatum = null;
+    renderMetrics({ mph: undefined, spin: undefined, ivb: undefined, hb: undefined });
   });
   container.appendChild(clr);
 }
@@ -176,6 +222,8 @@ export function initControls(data, setPlaying) {
     _state.pitcher = pitcherSelect.value;
     clearBalls();
     buildPitchCheckboxes(data[_state.team][_state.pitcher]);
+    _lastDatum = null;
+    renderMetrics({ mph: undefined, spin: undefined, ivb: undefined, hb: undefined });
     _writeUrl();
   });
 
@@ -192,42 +240,25 @@ export function initControls(data, setPlaying) {
 
   buildMetricsPanel(metricsPanel);
 
+  // Live updates from animation loop: mph/spin only in your feed.
   let loggedKeysOnce = false;
   Bus.on('frameStats', (s) => {
     const last = s && s.last ? s.last : {};
 
-    // Log the fields once so you can verify what the feed provides
     if (!loggedKeysOnce) {
-      try {
-        console.debug('[metrics] frameStats.last keys:', Object.keys(last).sort());
-      } catch (_) {}
+      try { console.debug('[metrics] frameStats.last keys:', Object.keys(last).sort()); } catch (_) {}
       loggedKeysOnce = true;
     }
 
-    const mph  = pick(last.mph, last.velocity, last.vel, last.release_speed);
-    const spin = pick(last.spin, last.rpm, last.release_spin_rate);
+    // Prefer live mph/spin if present; keep IVB/HB from selected datum.
+    const liveMph  = pick(last.mph, last.velocity, last.vel, last.release_speed);
+    const liveSpin = pick(last.spin, last.rpm, last.release_spin_rate);
 
-    // IVB/HB in inches: prefer inch-native fields first,
-    // else convert feet-based fields (movement_* ft → in)
-    const ivb = getVal(last, [
-      'ivb', 'ivb_in', 'ivb_inches', 'inducedVerticalBreak', 'vertBreak', 'vz_break', 'vertical_break',
-      ['pfx_z', 1],                // Statcast induced break in inches (+ up, - down)
-      ['movement_vertical', 12],   // feet → inches
-      ['movement_vertical_ft', 12]
-    ]);
+    const base = metricsFromDatum(_lastDatum);
+    const mph  = liveMph  !== undefined ? liveMph  : base.mph;
+    const spin = liveSpin !== undefined ? liveSpin : base.spin;
 
-    const hb  = getVal(last, [
-      'hb', 'hb_in', 'hb_inches', 'horizontalBreak', 'hbreak', 'vx_break', 'horizontal_break',
-      ['pfx_x', 1],                // Statcast horizontal break in inches (+ arm-side for RHP)
-      ['movement_horizontal', 12], // feet → inches
-      ['movement_horizontal_ft', 12]
-    ]);
-
-    const e = (id) => document.getElementById(id);
-    e('m-velo').textContent = fmt(mph, 1);
-    e('m-spin').textContent = fmt(spin, 0);
-    e('m-ivb').textContent  = fmt(ivb, 1);
-    e('m-hb').textContent   = fmt(hb, 1);
+    renderMetrics({ mph, spin, ivb: base.ivb, hb: base.hb });
   });
 
   const params = new URLSearchParams(location.search);
